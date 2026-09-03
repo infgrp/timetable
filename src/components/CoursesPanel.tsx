@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AppData, Course } from "../types";
-import { buildLectures, emptyCourse, periodsOf } from "../store";
+import { buildLectures, emptyCourse, periodsOf, roomLoads } from "../store";
 import { Button, Card, Empty, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -22,6 +22,8 @@ export default function CoursesPanel({ data, set }: Props) {
     return { byClass, byTeacher };
   }, [data]);
 
+  const loads = useMemo(() => roomLoads(data), [data]);
+
   const patch = (id: string, p: Partial<Course>) =>
     set((d) => ({ ...d, courses: d.courses.map((c) => (c.id === id ? { ...c, ...p } : c)) }));
 
@@ -35,13 +37,13 @@ export default function CoursesPanel({ data, set }: Props) {
     }));
 
   if (data.teachers.length === 0)
-    return <Empty>먼저 [교사] 탭에서 교사를 추가하세요.</Empty>;
+    return <Empty>먼저 [강사] 탭에서 강사를 추가하세요.</Empty>;
 
   return (
     <div className="flex flex-col gap-5">
       <Card
-        title={`담당 배정 (${data.courses.length}건)`}
-        desc="한 줄 = 한 교사가 한 과목을 여러 학급에 가르치는 배정입니다. 시수와 블록 수는 학급마다 각각 적용됩니다."
+        title={`프로그램 배정 (${data.courses.length}건)`}
+        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다."
         right={
           <Button variant="primary" onClick={addCourse}>
             + 배정 추가
@@ -55,12 +57,12 @@ export default function CoursesPanel({ data, set }: Props) {
             <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-tt-200 text-left text-xs font-semibold text-tt-600">
-                  <th className="w-40 py-2">교사</th>
-                  <th className="w-40 py-2">과목</th>
-                  <th className="py-2">학급</th>
+                  <th className="w-40 py-2">강사</th>
+                  <th className="w-44 py-2">프로그램</th>
+                  <th className="py-2">체험반</th>
                   <th className="w-24 py-2">주당 시수</th>
-                  <th className="w-24 py-2">블록 수</th>
-                  <th className="w-40 py-2">특별실</th>
+                  <th className="w-24 py-2">연속 2교시</th>
+                  <th className="w-44 py-2">체험존</th>
                   <th className="w-24 py-2" />
                 </tr>
               </thead>
@@ -85,7 +87,7 @@ export default function CoursesPanel({ data, set }: Props) {
                       <td className="py-1.5 pr-2">
                         <TextInput
                           value={c.subject}
-                          placeholder="예) 수학"
+                          placeholder="예) Airport & Immigration"
                           onChange={(e) => patch(c.id, { subject: e.target.value })}
                         />
                       </td>
@@ -96,7 +98,7 @@ export default function CoursesPanel({ data, set }: Props) {
                           className="w-full rounded-lg border border-tt-300 bg-white px-2.5 py-1.5 text-left text-sm hover:bg-tt-50"
                         >
                           {c.classIds.length === 0 ? (
-                            <span className="text-tt-400">학급 선택…</span>
+                            <span className="text-tt-400">체험반 선택…</span>
                           ) : (
                             c.classIds.map((id) => className.get(id) ?? "?").join(", ")
                           )}
@@ -153,7 +155,7 @@ export default function CoursesPanel({ data, set }: Props) {
                           min={0}
                           max={maxBlocks}
                           value={c.blocks}
-                          title="연속 2교시로 붙일 횟수"
+                          title="붙여서 진행할 2교시 묶음의 횟수"
                           onChange={(e) =>
                             patch(c.id, {
                               blocks: Math.max(0, Math.min(maxBlocks, Number(e.target.value))),
@@ -200,7 +202,7 @@ export default function CoursesPanel({ data, set }: Props) {
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title="학급별 총 시수" desc={`주당 수업 칸 ${capacity}칸`}>
+        <Card title="체험반별 총 시수" desc={`주당 운영 칸 ${capacity}칸`}>
           <div className="flex flex-wrap gap-2">
             {data.classes.map((k) => {
               const h = totals.byClass.get(k.id) ?? 0;
@@ -214,7 +216,41 @@ export default function CoursesPanel({ data, set }: Props) {
             })}
           </div>
         </Card>
-        <Card title="교사별 총 시수">
+        <Card
+          title="체험존 사용률"
+          desc={`존 하나가 쓸 수 있는 칸은 주당 ${capacity}칸입니다`}
+        >
+          {data.rooms.length === 0 ? (
+            <p className="text-sm text-tt-500">지정된 체험존이 없습니다.</p>
+          ) : (
+            <div className="flex flex-col gap-1.5">
+              {data.rooms.map((r) => {
+                const load = loads.get(r.id) ?? 0;
+                const pct = capacity > 0 ? Math.round((load / capacity) * 100) : 0;
+                const tone =
+                  load > capacity ? "bg-red-500" : pct > 85 ? "bg-amber-500" : "bg-tt-500";
+                return (
+                  <div key={r.id} className="flex items-center gap-2 text-xs">
+                    <span className="w-32 shrink-0 font-semibold text-tt-700">{r.name}</span>
+                    <span className="h-2 flex-1 overflow-hidden rounded-full bg-tt-100">
+                      <span
+                        className={`block h-full rounded-full ${tone}`}
+                        style={{ width: `${Math.min(100, pct)}%` }}
+                      />
+                    </span>
+                    <span className={`w-20 text-right ${load > capacity ? "font-bold text-red-600" : "text-tt-600"}`}>
+                      {load}/{capacity}칸
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Card title="강사별 총 시수">
           <div className="flex flex-wrap gap-2">
             {data.teachers.map((t) => {
               const h = totals.byTeacher.get(t.id) ?? 0;

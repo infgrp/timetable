@@ -63,14 +63,14 @@ export default function SlotsPanel({ data, set }: Props) {
     <div className="flex flex-col gap-5">
       <Card title="기본 정보">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="학교명 (인쇄물 머리글)">
+          <Field label="센터명 (인쇄물 머리글)">
             <TextInput
               value={data.schoolName}
-              placeholder="예) 양현고등학교"
+              placeholder="예) ○○영어체험센터"
               onChange={(e) => set((d) => ({ ...d, schoolName: e.target.value }))}
             />
           </Field>
-          <Field label="수업 요일">
+          <Field label="운영 요일">
             <div className="flex flex-wrap gap-1.5 pt-1">
               {ALL_DAYS.map((day) => {
                 const on = data.days.includes(day);
@@ -96,17 +96,17 @@ export default function SlotsPanel({ data, set }: Props) {
 
       <Card
         title="교시 자동 생성"
-        desc="1교시 시작 시각과 길이를 넣으면 점심시간까지 포함해 하루 구성을 만들어 줍니다."
+        desc="1교시 시작 시각과 길이를 넣으면 점심시간까지 포함해 하루 구성을 만들어 줍니다. 체험센터는 보통 40분 6교시로 운영합니다."
       >
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <Field label="1교시 시작">
             <TextInput
               value={gen.firstStart}
-              placeholder="08:50"
+              placeholder="09:00"
               onChange={(e) => setGen({ ...gen, firstStart: e.target.value })}
             />
           </Field>
-          <Field label="수업 (분)">
+          <Field label="프로그램 (분)">
             <TextInput
               type="number"
               min={1}
@@ -156,7 +156,7 @@ export default function SlotsPanel({ data, set }: Props) {
       </Card>
 
       <Card
-        title={`하루 시간 구성 (수업 ${periodCount}교시)`}
+        title={`하루 시간 구성 (프로그램 ${periodCount}교시)`}
         desc="점심·쉬는시간 칸을 사이에 두면 연속 2교시 블록이 그 지점을 넘지 못합니다."
         right={
           <div className="flex gap-2">
@@ -184,7 +184,7 @@ export default function SlotsPanel({ data, set }: Props) {
                       value={s.kind}
                       onChange={(e) => patchSlot(s.id, { kind: e.target.value as DaySlot["kind"] })}
                     >
-                      <option value="period">수업</option>
+                      <option value="period">프로그램</option>
                       <option value="break">쉬는시간</option>
                     </Select>
                   </td>

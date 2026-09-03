@@ -4,3 +4,5 @@ dist
 *.local
 .DS_Store
 scripts/*.mjs
+xlsx_check.xlsx
+영어체험센터_예시.json

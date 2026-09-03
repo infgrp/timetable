@@ -11,10 +11,10 @@ import ResultPanel from "./components/ResultPanel";
 import { Button } from "./components/ui";
 
 const TABS = [
-  { id: "time", label: "시간 설정" },
-  { id: "class", label: "학급·특별실" },
-  { id: "teacher", label: "교사" },
-  { id: "course", label: "담당 배정" },
+  { id: "time", label: "운영 시간" },
+  { id: "class", label: "체험반·체험존" },
+  { id: "teacher", label: "강사" },
+  { id: "course", label: "프로그램 배정" },
   { id: "result", label: "시간표" },
 ] as const;
 
@@ -47,7 +47,7 @@ export default function App() {
       <header className="no-print border-b border-tt-200 bg-white">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-3">
           <div>
-            <h1 className="text-lg font-bold text-tt-800">시간표 작성기</h1>
+            <h1 className="text-lg font-bold text-tt-800">영어체험센터 시간표 작성기</h1>
             <p className="text-xs text-tt-500">
               입력한 내용은 이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다.
             </p>

@@ -32,13 +32,14 @@ export type SlotGenOptions = {
   lunchMinutes: number;
 };
 
+/** 영어체험센터 표준 운영에 맞춘 기본값 — 09:00 시작, 40분 프로그램, 6교시. */
 export const DEFAULT_GEN: SlotGenOptions = {
-  firstStart: "08:50",
-  periodMinutes: 50,
+  firstStart: "09:00",
+  periodMinutes: 40,
   breakMinutes: 10,
-  periodCount: 7,
+  periodCount: 6,
   lunchAfter: 4,
-  lunchMinutes: 50,
+  lunchMinutes: 60,
 };
 
 /** 1교시 시작 시각과 수업·쉬는시간 길이로 하루 시간표 칸을 만든다. */
@@ -87,7 +88,7 @@ export function emptyCourse(teacherId: string): Course {
 }
 
 export function defaultData(): AppData {
-  const classes = [1, 2, 3, 4].map((n) => ({ id: uid("k"), name: `1-${n}` }));
+  const classes = ["A", "B", "C", "D"].map((n) => ({ id: uid("k"), name: `${n}반` }));
   return {
     version: 1,
     schoolName: "",
@@ -98,6 +99,16 @@ export function defaultData(): AppData {
     teachers: [],
     courses: [],
   };
+}
+
+/** 체험존별 주당 사용 칸 수 (병목을 눈으로 확인하려고 쓴다) */
+export function roomLoads(data: AppData): Map<string, number> {
+  const load = new Map<string, number>();
+  for (const course of data.courses) {
+    if (!course.roomId) continue;
+    load.set(course.roomId, (load.get(course.roomId) ?? 0) + course.hours * course.classIds.length);
+  }
+  return load;
 }
 
 /** ── 파생 값 ───────────────────────────────────────────── */
@@ -161,35 +172,41 @@ export function validate(data: AppData): Issue[] {
   const D = data.days.length;
   const capacity = P * D;
 
-  if (D === 0) issues.push({ level: "error", text: "요일이 하나도 선택되지 않았습니다." });
-  if (P === 0) issues.push({ level: "error", text: "수업 교시가 하나도 없습니다." });
-  if (data.classes.length === 0) issues.push({ level: "error", text: "학급이 없습니다." });
+  if (D === 0) issues.push({ level: "error", text: "운영 요일이 하나도 선택되지 않았습니다." });
+  if (P === 0) issues.push({ level: "error", text: "프로그램 교시가 하나도 없습니다." });
+  if (data.classes.length === 0) issues.push({ level: "error", text: "체험반이 없습니다." });
 
   const lectures = buildLectures(data);
   if (lectures.length === 0)
-    issues.push({ level: "error", text: "배정된 수업이 없습니다. [담당 배정] 탭에서 입력하세요." });
+    issues.push({ level: "error", text: "배정된 프로그램이 없습니다. [프로그램 배정] 탭에서 입력하세요." });
 
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
   const className = new Map(data.classes.map((c) => [c.id, c.name]));
+  const roomName = new Map(data.rooms.map((r) => [r.id, r.name]));
 
-  // 학급별 총 시수
+  // 체험반별 총 시수
   const perClass = new Map<string, number>();
   for (const lec of lectures) perClass.set(lec.classId, (perClass.get(lec.classId) ?? 0) + lec.hours);
+  const gaps: string[] = [];
   for (const k of data.classes) {
     const h = perClass.get(k.id) ?? 0;
     if (h > capacity)
       issues.push({
         level: "error",
-        text: `${k.name} 학급의 총 시수 ${h}시간이 주당 수업 칸 ${capacity}칸을 넘습니다.`,
+        text: `${k.name}의 총 시수 ${h}시간이 주당 운영 칸 ${capacity}칸을 넘습니다.`,
       });
-    else if (h < capacity)
-      issues.push({
-        level: "warn",
-        text: `${k.name} 학급은 ${capacity - h}칸이 빈 시간으로 남습니다. (총 ${h}시간)`,
-      });
+    else if (h < capacity) gaps.push(`${k.name} ${capacity - h}칸`);
   }
+  // 방문형 운영에서는 빈 칸이 정상이므로 한 줄로 묶어 알린다.
+  if (gaps.length > 0)
+    issues.push({
+      level: "warn",
+      text: `빈 시간이 남는 체험반 ${gaps.length}개 — ${gaps.slice(0, 6).join(", ")}${
+        gaps.length > 6 ? " …" : ""
+      }. 상주형이 아니라면 정상입니다.`,
+    });
 
-  // 교사별 총 시수 vs 가용 슬롯
+  // 강사별 총 시수 vs 가용 칸
   const perTeacher = new Map<string, number>();
   for (const lec of lectures) perTeacher.set(lec.teacherId, (perTeacher.get(lec.teacherId) ?? 0) + lec.hours);
   for (const t of data.teachers) {
@@ -202,21 +219,36 @@ export function validate(data: AppData): Issue[] {
     if (h > free)
       issues.push({
         level: "error",
-        text: `${t.name || "(이름없음)"} 교사의 총 시수 ${h}시간이 회피 시간을 뺀 ${free}칸보다 많습니다.`,
+        text: `${t.name || "(이름없음)"} 강사의 총 시수 ${h}시간이 회피 시간을 뺀 ${free}칸보다 많습니다.`,
       });
   }
 
-  // 같은 학급 같은 과목 하루 1회 → 배치 단위 수가 요일 수를 넘으면 불가능
+  // 체험존 수용량 — 체험센터에서 가장 먼저 터지는 곳
+  const loads = roomLoads(data);
+  for (const [roomId, load] of loads) {
+    if (load > capacity)
+      issues.push({
+        level: "error",
+        text: `${roomName.get(roomId) ?? "체험존"}에 주당 ${load}칸이 몰려 있는데 존은 ${capacity}칸뿐입니다. 존을 늘리거나 시수를 줄이세요.`,
+      });
+    else if (load > capacity * 0.85)
+      issues.push({
+        level: "warn",
+        text: `${roomName.get(roomId) ?? "체험존"} 사용률이 ${Math.round((load / capacity) * 100)}%입니다 (${load}/${capacity}칸). 배치가 빡빡해질 수 있습니다.`,
+      });
+  }
+
+  // 같은 체험반의 같은 프로그램은 하루 1회 → 배치 횟수가 요일 수를 넘으면 불가능
   for (const lec of lectures) {
     const unitCount = lec.blocks + (lec.hours - lec.blocks * 2);
     if (unitCount > D)
       issues.push({
         level: "error",
-        text: `${className.get(lec.classId) ?? ""} ${lec.subject}: 하루 1회 규칙 때문에 주 ${D}회까지만 가능한데 ${unitCount}회가 필요합니다. 블록 수를 늘리거나 시수를 줄이세요.`,
+        text: `${className.get(lec.classId) ?? ""} ${lec.subject}: 하루 1회 규칙 때문에 주 ${D}회까지만 가능한데 ${unitCount}회가 필요합니다. 연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
       });
   }
 
-  // 블록 배치가 가능한 자리가 있는지
+  // 블록을 놓을 자리가 있는지
   const flags = blockableFlags(data.slots);
   const blockSlots = flags.filter(Boolean).length;
   if (blockSlots === 0 && lectures.some((l) => l.blocks > 0))
@@ -225,12 +257,13 @@ export function validate(data: AppData): Issue[] {
       text: "연속 2교시로 붙일 수 있는 자리가 없습니다. 교시 사이에 쉬는시간 칸이 들어가 있는지 확인하세요.",
     });
 
+  if (data.courses.some((c) => !c.subject.trim()))
+    issues.push({ level: "warn", text: "프로그램명이 비어 있는 배정이 있습니다." });
   for (const c of data.courses) {
-    if (!c.subject.trim()) issues.push({ level: "warn", text: "과목명이 비어 있는 배정이 있습니다." });
     if (c.classIds.length === 0)
       issues.push({
         level: "warn",
-        text: `${teacherName.get(c.teacherId) ?? ""} ${c.subject}: 학급이 지정되지 않아 무시됩니다.`,
+        text: `${teacherName.get(c.teacherId) ?? ""} ${c.subject}: 체험반이 지정되지 않아 무시됩니다.`,
       });
   }
 

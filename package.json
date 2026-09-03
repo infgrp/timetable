@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "bench": "esbuild scripts/bench.ts --bundle --platform=node --format=esm --outfile=scripts/bench.mjs --log-level=warning && node scripts/bench.mjs",
-    "stress": "esbuild scripts/stress.ts --bundle --platform=node --format=esm --outfile=scripts/stress.mjs --log-level=warning && node scripts/stress.mjs"
+    "stress": "esbuild scripts/stress.ts --bundle --platform=node --format=esm --outfile=scripts/stress.mjs --log-level=warning && node scripts/stress.mjs",
+    "xlsx:check": "esbuild scripts/xlsx_check.ts --bundle --platform=node --format=esm --outfile=scripts/xlsx_check.mjs --log-level=warning && node scripts/xlsx_check.mjs",
+    "sample": "esbuild scripts/english_center.ts --bundle --platform=node --format=esm --outfile=scripts/english_center.mjs --log-level=warning && node scripts/english_center.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",

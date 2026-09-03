@@ -1,13 +1,37 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppData, Lecture, SolveRequest, SolveResult, WorkerOut } from "../types";
 import { blockableFlags, buildLectures, periodsOf, validate } from "../store";
-import { downloadText, toCsv } from "../export";
-import { Button, Card, Empty } from "./ui";
+import { downloadBlob, downloadText, safeFileName, toCsv } from "../export";
+import { buildXlsx } from "../xlsx";
+import type { XSheet } from "../xlsx";
+import { toSheet } from "../timetableSheet";
+import { Button, Card, Empty, Field, TextInput } from "./ui";
 import Timetable, { hueOf } from "./Timetable";
 import type { Cell, Grid } from "./Timetable";
 
 type Props = { data: AppData };
-type View = "class" | "teacher";
+type Axis = "class" | "teacher" | "room";
+
+const AXIS_LABEL: Record<Axis, string> = { class: "체험반", teacher: "강사", room: "체험존" };
+type Target = { id: string; name: string };
+
+/** 받침 유무에 따라 조사를 고른다. 한글이 아니면 둘 다 적는다. */
+function josa(word: string, withJong: string, without: string): string {
+  const last = word.trim().slice(-1);
+  const code = last.charCodeAt(0);
+  if (!(code >= 0xac00 && code <= 0xd7a3)) return `${withJong}(${without})`;
+  return (code - 0xac00) % 28 !== 0 ? withJong : without;
+}
+
+/** 엑셀은 통합문서 안에서 시트 이름이 겹치면 안 된다. */
+function dedupe(names: string[]): string[] {
+  const seen = new Map<string, number>();
+  return names.map((raw) => {
+    const n = seen.get(raw) ?? 0;
+    seen.set(raw, n + 1);
+    return n === 0 ? raw : `${raw} (${n + 1})`;
+  });
+}
 
 const TIME_LIMITS = [
   { label: "빠르게 (3초)", ms: 3000 },
@@ -20,7 +44,9 @@ export default function ResultPanel({ data }: Props) {
   const [progress, setProgress] = useState<string>("");
   const [result, setResult] = useState<SolveResult | null>(null);
   const [solved, setSolved] = useState<{ lectures: Lecture[]; data: AppData } | null>(null);
-  const [view, setView] = useState<View>("class");
+  const [view, setView] = useState<Axis>("class");
+  const [kind, setKind] = useState<Axis>("class");
+  const [query, setQuery] = useState("");
   const [limitMs, setLimitMs] = useState(10000);
   const workerRef = useRef<Worker | null>(null);
 
@@ -95,12 +121,14 @@ export default function ResultPanel({ data }: Props) {
   const grids = useMemo(() => {
     const byClass = new Map<string, Grid>();
     const byTeacher = new Map<string, Grid>();
-    if (!result || !solved) return { byClass, byTeacher };
+    const byRoom = new Map<string, Grid>();
+    if (!result || !solved) return { byClass, byTeacher, byRoom };
 
     const blank = (): Grid =>
       Array.from({ length: periods.length }, () => new Array(snap.days.length).fill(null));
     for (const c of snap.classes) byClass.set(c.id, blank());
     for (const t of snap.teachers) byTeacher.set(t.id, blank());
+    for (const r of snap.rooms) byRoom.set(r.id, blank());
 
     for (const unit of result.placed) {
       const lec = solved.lectures[unit.lectureIndex];
@@ -120,8 +148,15 @@ export default function ResultPanel({ data }: Props) {
         span: unit.length,
         hue,
       };
+      const zone: Cell = {
+        top: className.get(lec.classId) ?? "",
+        bottom: [lec.subject, teacherName.get(lec.teacherId)].filter(Boolean).join(" · "),
+        span: unit.length,
+        hue,
+      };
       const cg = byClass.get(lec.classId);
       const tg = byTeacher.get(lec.teacherId);
+      const rg = lec.roomId ? byRoom.get(lec.roomId) : undefined;
       if (cg) {
         cg[unit.period][unit.day] = cls;
         for (let k = 1; k < unit.length; k++) cg[unit.period + k][unit.day] = "cont";
@@ -130,13 +165,17 @@ export default function ResultPanel({ data }: Props) {
         tg[unit.period][unit.day] = tch;
         for (let k = 1; k < unit.length; k++) tg[unit.period + k][unit.day] = "cont";
       }
+      if (rg) {
+        rg[unit.period][unit.day] = zone;
+        for (let k = 1; k < unit.length; k++) rg[unit.period + k][unit.day] = "cont";
+      }
     }
-    return { byClass, byTeacher };
+    return { byClass, byTeacher, byRoom };
   }, [result, solved]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const exportCsv = () => {
     if (!result || !solved) return;
-    const rows: string[][] = [["학급", "요일", "교시", "과목", "교사", "특별실", "연속"]];
+    const rows: string[][] = [["체험반", "요일", "교시", "프로그램", "강사", "체험존", "연속"]];
     const sorted = [...result.placed].sort(
       (a, b) => a.day - b.day || a.period - b.period || a.lectureIndex - b.lectureIndex,
     );
@@ -155,6 +194,48 @@ export default function ResultPanel({ data }: Props) {
       }
     }
     downloadText("시간표.csv", toCsv(rows), "text/csv;charset=utf-8");
+  };
+
+  // ── 엑셀 내려받기 ─────────────────────────────────────
+  const targets: Target[] = (
+    kind === "class" ? snap.classes : kind === "teacher" ? snap.teachers : snap.rooms
+  ).map((x) => ({ id: x.id, name: x.name || "(이름없음)" }));
+
+  const kindLabel = AXIS_LABEL[kind];
+  const q = query.trim().toLowerCase();
+  const hits = q ? targets.filter((t) => t.name.toLowerCase().includes(q)) : [];
+  const exact = q ? targets.find((t) => t.name.toLowerCase() === q) : undefined;
+  const match = exact ?? (hits.length === 1 ? hits[0] : null);
+
+  const gridOf = (id: string): Grid =>
+    (kind === "class" ? grids.byClass : kind === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ??
+    [];
+
+  const head = snap.schoolName ? snap.schoolName + " " : "";
+  const titleOf = (name: string) =>
+    kind === "teacher" ? `${head}${name} 강사 시간표` : `${head}${name} 시간표`;
+
+  const sheetOf = (t: Target, sheetName: string): XSheet =>
+    toSheet({
+      sheetName,
+      title: titleOf(t.name),
+      days: snap.days,
+      slots: snap.slots,
+      grid: gridOf(t.id),
+    });
+
+  const downloadOne = () => {
+    if (!match) return;
+    const label = kind === "teacher" ? `${match.name} 강사` : match.name;
+    downloadBlob(`${safeFileName(label)} 시간표.xlsx`, buildXlsx([sheetOf(match, match.name)]));
+  };
+
+  const downloadAll = () => {
+    if (targets.length === 0) return;
+    const names = dedupe(targets.map((t) => t.name));
+    const sheets = targets.map((t, i) => sheetOf(t, names[i]));
+    const label = `${kindLabel}별`;
+    downloadBlob(`${safeFileName(snap.schoolName || "시간표")} ${label} 시간표.xlsx`, buildXlsx(sheets));
   };
 
   return (
@@ -217,19 +298,23 @@ export default function ResultPanel({ data }: Props) {
                 </span>
               </p>
               <div className="no-print flex flex-wrap gap-2">
-                <Button
-                  variant={view === "class" ? "primary" : "ghost"}
-                  onClick={() => setView("class")}
-                >
-                  학급별
-                </Button>
-                <Button
-                  variant={view === "teacher" ? "primary" : "ghost"}
-                  onClick={() => setView("teacher")}
-                >
-                  교사별
-                </Button>
-                <Button onClick={exportCsv}>CSV 내려받기</Button>
+                {(["class", "teacher", "room"] as const).map((a) => (
+                  <Button
+                    key={a}
+                    variant={view === a ? "primary" : "ghost"}
+                    disabled={a === "room" && snap.rooms.length === 0}
+                    title={
+                      a === "room" && snap.rooms.length === 0 ? "지정된 체험존이 없습니다" : undefined
+                    }
+                    onClick={() => {
+                      setView(a);
+                      setKind(a);
+                      setQuery("");
+                    }}
+                  >
+                    {AXIS_LABEL[a]}별
+                  </Button>
+                ))}
                 <Button onClick={() => window.print()}>인쇄 / PDF</Button>
               </div>
             </div>
@@ -255,31 +340,112 @@ export default function ResultPanel({ data }: Props) {
             )}
           </Card>
 
+          <Card
+            title="엑셀로 내려받기"
+            desc="체험반·강사·체험존 중 하나를 고르고 이름을 넣으면 그 한 장만 받습니다. 연속 2교시 병합과 점심시간까지 표 모양 그대로 들어갑니다."
+          >
+            <div className="no-print flex flex-wrap items-end gap-3">
+              <Field label="구분">
+                <div className="flex gap-1.5 pt-0.5">
+                  {(["class", "teacher", "room"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      disabled={k === "room" && snap.rooms.length === 0}
+                      onClick={() => {
+                        setKind(k);
+                        setQuery("");
+                      }}
+                      className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition disabled:opacity-40 ${
+                        kind === k
+                          ? "border-tt-600 bg-tt-600 text-white"
+                          : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
+                      }`}
+                    >
+                      {AXIS_LABEL[k]}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <div className="w-60">
+                <Field
+                  label={`${kindLabel} 이름`}
+                  hint="일부만 입력해도 됩니다"
+                >
+                  <TextInput
+                    list="tt-download-targets"
+                    value={query}
+                    placeholder={targets[0] ? `예) ${targets[0].name}` : ""}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && match) downloadOne();
+                    }}
+                  />
+                  <datalist id="tt-download-targets">
+                    {targets.map((t) => (
+                      <option key={t.id} value={t.name} />
+                    ))}
+                  </datalist>
+                </Field>
+              </div>
+
+              <Button variant="primary" disabled={!match} onClick={downloadOne}>
+                {match ? `${match.name} 시간표 받기` : "엑셀(.xlsx) 받기"}
+              </Button>
+              <Button onClick={downloadAll}>
+                전체 {kindLabel} 한 파일로
+              </Button>
+              <Button onClick={exportCsv}>전체 목록 CSV</Button>
+            </div>
+
+            {q && !match && (
+              <p className="mt-3 text-sm text-amber-700">
+                {hits.length === 0
+                  ? `'${query.trim()}'${josa(query, "과", "와")} 일치하는 ${kindLabel}${josa(kindLabel, "이", "가")} 없습니다.`
+                  : `${hits.length}개가 일치합니다 — ${hits
+                      .slice(0, 6)
+                      .map((h) => h.name)
+                      .join(", ")}${hits.length > 6 ? " …" : ""}. 더 정확히 입력하세요.`}
+              </p>
+            )}
+          </Card>
+
           <div className="grid gap-5 xl:grid-cols-2">
-            {view === "class"
-              ? snap.classes.map((c) => (
+            {(view === "class" ? snap.classes : view === "teacher" ? snap.teachers : snap.rooms).map(
+              (x) => {
+                const g =
+                  (view === "class"
+                    ? grids.byClass
+                    : view === "teacher"
+                      ? grids.byTeacher
+                      : grids.byRoom
+                  ).get(x.id) ?? [];
+                const used = g.flat().filter((cell) => cell !== null).length;
+                const name = x.name || "(이름없음)";
+                const capacity = periods.length * snap.days.length;
+                return (
                   <Timetable
-                    key={c.id}
-                    title={`${snap.schoolName ? snap.schoolName + " " : ""}${c.name} 시간표`}
+                    key={x.id}
+                    title={
+                      view === "teacher"
+                        ? `${name} 강사`
+                        : `${snap.schoolName ? snap.schoolName + " " : ""}${name}`
+                    }
+                    subtitle={
+                      view === "class"
+                        ? `주 ${used}시간 · 빈 칸 ${capacity - used}`
+                        : view === "teacher"
+                          ? `주 ${used}시간`
+                          : `사용 ${used}/${capacity}칸 (${Math.round((used / capacity) * 100)}%)`
+                    }
                     days={snap.days}
                     slots={snap.slots}
-                    grid={grids.byClass.get(c.id) ?? []}
+                    grid={g}
                   />
-                ))
-              : snap.teachers.map((t) => {
-                  const g = grids.byTeacher.get(t.id) ?? [];
-                  const hours = g.flat().filter((x) => x !== null).length;
-                  return (
-                    <Timetable
-                      key={t.id}
-                      title={`${t.name || "(이름없음)"} 선생님`}
-                      subtitle={`주 ${hours}시간`}
-                      days={snap.days}
-                      slots={snap.slots}
-                      grid={g}
-                    />
-                  );
-                })}
+                );
+              },
+            )}
           </div>
         </>
       )}

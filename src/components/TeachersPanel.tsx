@@ -67,7 +67,7 @@ export default function TeachersPanel({ data, set }: Props) {
 
   return (
     <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
-      <Card title={`교사 (${data.teachers.length}명)`}>
+      <Card title={`강사 (${data.teachers.length}명)`}>
         <div className="mb-3 flex flex-col gap-2">
           <Field label="여러 명 한 번에 추가" hint="줄바꿈 또는 쉼표로 구분">
             <textarea
@@ -89,13 +89,13 @@ export default function TeachersPanel({ data, set }: Props) {
                 setSelected(t.id);
               }}
             >
-              + 빈 교사
+              + 빈 강사
             </Button>
           </div>
         </div>
 
         {data.teachers.length === 0 ? (
-          <Empty>교사를 추가하세요.</Empty>
+          <Empty>강사를 추가하세요.</Empty>
         ) : (
           <ul className="max-h-[520px] overflow-y-auto">
             {data.teachers.map((t) => {
@@ -114,7 +114,7 @@ export default function TeachersPanel({ data, set }: Props) {
                   </button>
                   <TextInput
                     value={t.name}
-                    placeholder="교사명"
+                    placeholder="강사명"
                     onFocus={() => setSelected(t.id)}
                     onChange={(e) =>
                       set((d) => ({
@@ -137,7 +137,7 @@ export default function TeachersPanel({ data, set }: Props) {
 
       <Card
         title={teacher ? `${teacher.name || "(이름없음)"} 선생님 회피 시간` : "회피 시간"}
-        desc="수업을 넣지 않을 칸을 눌러 표시합니다. 끌어서 여러 칸을 한 번에 칠할 수 있고, 요일·교시 머리글을 누르면 줄 전체가 바뀝니다."
+        desc="프로그램을 넣지 않을 칸을 눌러 표시합니다. 끌어서 여러 칸을 한 번에 칠할 수 있고, 요일·교시 머리글을 누르면 줄 전체가 바뀝니다."
         right={
           teacher && teacher.unavailable.length > 0 ? (
             <Button onClick={() => setUnavailable([])}>전체 해제</Button>
@@ -145,9 +145,9 @@ export default function TeachersPanel({ data, set }: Props) {
         }
       >
         {!teacher ? (
-          <Empty>왼쪽에서 교사를 선택하세요.</Empty>
+          <Empty>왼쪽에서 강사를 선택하세요.</Empty>
         ) : periods.length === 0 || data.days.length === 0 ? (
-          <Empty>먼저 [시간 설정]에서 요일과 교시를 만드세요.</Empty>
+          <Empty>먼저 [운영 시간]에서 요일과 교시를 만드세요.</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="border-collapse select-none text-sm">
