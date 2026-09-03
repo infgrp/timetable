@@ -18,3 +18,19 @@ function cell(v: string): string {
 export function toCsv(rows: string[][]): string {
   return "﻿" + rows.map((r) => r.map(cell).join(",")).join("\r\n");
 }
+
+export function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** 윈도우 파일명에 못 쓰는 문자를 걷어낸다. */
+export function safeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim() || "시간표";
+}
