@@ -74,7 +74,18 @@ function bigSchool(): AppData {
         : [`${d}:${P - 1}`, `${d}:${P - 2}`];
   });
 
-  return { version: 1, schoolName: "부하테스트고", days, slots, classes, rooms, teachers, courses };
+  return {
+    version: 2,
+    schoolName: "부하테스트고",
+    days,
+    slots,
+    classes,
+    rooms,
+    teachers,
+    courses,
+    timetable: [],
+    rotation: { groups: [], rounds: [] },
+  };
 }
 
 const data = bigSchool();

@@ -55,8 +55,46 @@ export type Course = {
   roomId: string | null;
 };
 
+/**
+ * 배치된 한 칸. 연속 2교시면 length 2.
+ *
+ * 자동 배치 결과·엑셀로 올린 기존 시간표·손으로 고친 내용이 전부 같은 모양이라,
+ * 화면·엑셀·로테이션이 모두 이 목록 하나만 본다.
+ */
+export type Assignment = {
+  id: string;
+  classId: string;
+  teacherId: string | null;
+  roomId: string | null;
+  subject: string;
+  /** days 의 index */
+  day: number;
+  /** break 를 제외한 수업 교시만 센 시작 index */
+  period: number;
+  length: 1 | 2;
+};
+
+/** 로테이션 한 바퀴를 도는 강사 묶음. 목록의 순서가 곧 도는 순서다. */
+export type RotationGroup = {
+  id: string;
+  name: string;
+  teacherIds: string[];
+};
+
+/** 회차 하나(9월·10월…). step 만큼 밀어서 담당을 바꾼다. */
+export type RotationRound = {
+  id: string;
+  name: string;
+  step: number;
+};
+
+export type RotationConfig = {
+  groups: RotationGroup[];
+  rounds: RotationRound[];
+};
+
 export type AppData = {
-  version: 1;
+  version: 2;
   schoolName: string;
   days: string[];
   slots: DaySlot[];
@@ -64,6 +102,9 @@ export type AppData = {
   rooms: Room[];
   teachers: Teacher[];
   courses: Course[];
+  /** 현재 구성된 시간표(기준안). 로테이션은 여기에 강사만 갈아끼워 파생시킨다. */
+  timetable: Assignment[];
+  rotation: RotationConfig;
 };
 
 /** ── 솔버 입출력 ─────────────────────────────────────────── */

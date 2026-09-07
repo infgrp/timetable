@@ -1,4 +1,4 @@
-import type { AppData, Course, DaySlot, Lecture, Teacher } from "./types";
+import type { AppData, Course, DaySlot, Lecture, RotationConfig, Teacher } from "./types";
 
 export const STORAGE_KEY = "timetable.data.v1";
 
@@ -87,10 +87,14 @@ export function emptyCourse(teacherId: string): Course {
   };
 }
 
+export function emptyRotation(): RotationConfig {
+  return { groups: [], rounds: [] };
+}
+
 export function defaultData(): AppData {
   const classes = ["A", "B", "C", "D"].map((n) => ({ id: uid("k"), name: `${n}반` }));
   return {
-    version: 1,
+    version: 2,
     schoolName: "",
     days: ["월", "화", "수", "목", "금"],
     slots: generateSlots(DEFAULT_GEN),
@@ -98,6 +102,8 @@ export function defaultData(): AppData {
     rooms: [],
     teachers: [],
     courses: [],
+    timetable: [],
+    rotation: emptyRotation(),
   };
 }
 
@@ -272,13 +278,33 @@ export function validate(data: AppData): Issue[] {
 
 /** ── 저장 ─────────────────────────────────────────────── */
 
+/**
+ * 예전 저장본(version 1)에는 시간표·로테이션 칸이 없다. 비어 있는 채로 채워 넣어 그대로 이어 쓴다.
+ * 알 수 없는 버전이면 손대지 않고 처음 상태로 돌아간다.
+ */
+export function migrate(raw: unknown): AppData | null {
+  if (!raw || typeof raw !== "object") return null;
+  const parsed = raw as Partial<Omit<AppData, "version">> & { version?: number };
+  if (parsed.version !== 1 && parsed.version !== 2) return null;
+  const base = defaultData();
+  const rotation = parsed.rotation ?? emptyRotation();
+  return {
+    ...base,
+    ...parsed,
+    version: 2,
+    timetable: Array.isArray(parsed.timetable) ? parsed.timetable : [],
+    rotation: {
+      groups: Array.isArray(rotation.groups) ? rotation.groups : [],
+      rounds: Array.isArray(rotation.rounds) ? rotation.rounds : [],
+    },
+  };
+}
+
 export function load(): AppData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultData();
-    const parsed = JSON.parse(raw) as AppData;
-    if (!parsed || parsed.version !== 1) return defaultData();
-    return { ...defaultData(), ...parsed };
+    return migrate(JSON.parse(raw)) ?? defaultData();
   } catch {
     return defaultData();
   }

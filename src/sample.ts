@@ -48,8 +48,18 @@ export function sampleData(): AppData {
     정하늘: ["1:5", "3:5"], // 화·목 6교시
   };
 
+  // 존을 맡은 원어민 여섯이 달마다 한 칸씩 존을 바꿔 도는 구조 (로테이션 예시)
+  const rotationTeachers = [
+    "Emma Clark",
+    "Jack Miller",
+    "Olivia Brown",
+    "Liam Davis",
+    "Sophia Wilson",
+    "박세계",
+  ].map((name) => teacherId.get(name)!);
+
   return {
-    version: 1,
+    version: 2,
     schoolName: "○○영어체험센터",
     days: ["월", "화", "수", "목", "금"],
     slots: generateSlots(DEFAULT_GEN),
@@ -69,5 +79,14 @@ export function sampleData(): AppData {
       blocks,
       roomId,
     })),
+    timetable: [],
+    rotation: {
+      groups: [{ id: uid("g"), name: "존 담당 원어민", teacherIds: rotationTeachers }],
+      rounds: ["3월", "4월", "5월", "6월", "7월", "9월"].map((name, i) => ({
+        id: uid("r"),
+        name,
+        step: i,
+      })),
+    },
   };
 }
