@@ -1,8 +1,29 @@
+import type { DragEvent } from "react";
 import type { DaySlot } from "../types";
 
-export type Cell = { top: string; bottom?: string; span: number; hue: number };
+export type Cell = {
+  top: string;
+  bottom?: string;
+  span: number;
+  hue: number;
+  /** 편집 대상 Assignment id. 편집 모드에서만 쓴다. */
+  id?: string;
+  /** 충돌에 얽힌 칸 */
+  bad?: boolean;
+};
 /** grid[periodIndex][dayIndex] — "cont" 는 위 칸이 이어지는 자리 */
 export type Grid = (Cell | "cont" | null)[][];
+
+/** 편집 모드에서 격자가 바깥으로 넘기는 동작들. */
+export type EditHooks = {
+  selectedId: string | null;
+  /** 배치된 칸을 눌렀을 때 */
+  onPick: (id: string) => void;
+  /** 빈 칸을 눌렀을 때 */
+  onAddAt: (day: number, period: number) => void;
+  /** 칸을 끌어다 놓았을 때 */
+  onMove: (id: string, day: number, period: number) => void;
+};
 
 export function hueOf(text: string): number {
   let h = 0;
@@ -10,18 +31,22 @@ export function hueOf(text: string): number {
   return h;
 }
 
+const DRAG_TYPE = "text/plain";
+
 export default function Timetable({
   title,
   subtitle,
   days,
   slots,
   grid,
+  edit,
 }: {
   title: string;
   subtitle?: string;
   days: string[];
   slots: DaySlot[];
   grid: Grid;
+  edit?: EditHooks;
 }) {
   let periodIndex = -1;
   return (
@@ -76,15 +101,51 @@ export default function Timetable({
                   {days.map((day, di) => {
                     const cell = grid[pi]?.[di] ?? null;
                     if (cell === "cont") return null;
+
+                    // 편집 모드에서는 빈 칸도 놓을 자리가 된다.
+                    const dropProps = edit
+                      ? {
+                          onDragOver: (e: DragEvent) => e.preventDefault(),
+                          onDrop: (e: DragEvent) => {
+                            e.preventDefault();
+                            const id = e.dataTransfer.getData(DRAG_TYPE);
+                            if (id) edit.onMove(id, di, pi);
+                          },
+                        }
+                      : {};
+
                     if (!cell)
                       return (
-                        <td key={day} className="h-12 border border-tt-200 bg-white" />
+                        <td
+                          key={day}
+                          {...dropProps}
+                          onClick={edit ? () => edit.onAddAt(di, pi) : undefined}
+                          className={`h-12 border border-tt-200 bg-white ${
+                            edit ? "cursor-cell text-center align-middle text-tt-300 hover:bg-tt-50" : ""
+                          }`}
+                        >
+                          {edit ? <span className="no-print text-lg leading-none">+</span> : null}
+                        </td>
                       );
+
+                    const picked = edit?.selectedId && cell.id === edit.selectedId;
                     return (
                       <td
                         key={day}
                         rowSpan={cell.span}
-                        className="h-12 border border-tt-200 px-1 py-1 text-center align-middle"
+                        {...dropProps}
+                        draggable={Boolean(edit && cell.id)}
+                        onDragStart={
+                          edit && cell.id
+                            ? (e) => e.dataTransfer.setData(DRAG_TYPE, cell.id as string)
+                            : undefined
+                        }
+                        onClick={edit && cell.id ? () => edit.onPick(cell.id as string) : undefined}
+                        className={`h-12 border px-1 py-1 text-center align-middle ${
+                          cell.bad ? "border-red-400 ring-1 ring-red-400" : "border-tt-200"
+                        } ${picked ? "outline outline-2 outline-tt-600" : ""} ${
+                          edit && cell.id ? "cursor-grab active:cursor-grabbing" : ""
+                        }`}
                         style={{ background: `hsl(${cell.hue} 70% 94%)` }}
                       >
                         <div className="text-[13px] font-bold leading-tight text-tt-900">{cell.top}</div>

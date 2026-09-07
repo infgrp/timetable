@@ -1,15 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppData, Lecture, SolveRequest, SolveResult, WorkerOut } from "../types";
+import type { AppData, Assignment, Lecture, SolveRequest, SolveResult, WorkerOut } from "../types";
 import { blockableFlags, buildLectures, periodsOf, validate } from "../store";
 import { downloadBlob, downloadText, safeFileName, toCsv } from "../export";
 import { buildXlsx } from "../xlsx";
 import type { XSheet } from "../xlsx";
 import { toSheet } from "../timetableSheet";
+import { toTemplateRows } from "../importTimetable";
+import {
+  buildGrids,
+  conflictLabel,
+  conflictsOf,
+  fits,
+  fromSolveResult,
+  newAssignment,
+  periodsCovered,
+  removeAssignment,
+  setPosition,
+  sortAssignments,
+  swapPositions,
+  upsert,
+} from "../assignments";
+import { BASE_ROUND, rotateAssignments } from "../rotation";
+import ImportPanel from "./ImportPanel";
+import AssignmentEditor from "./AssignmentEditor";
 import { Button, Card, Empty, Field, TextInput } from "./ui";
-import Timetable, { hueOf } from "./Timetable";
-import type { Cell, Grid } from "./Timetable";
+import Timetable from "./Timetable";
+import type { EditHooks, Grid } from "./Timetable";
 
-type Props = { data: AppData };
+type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 type Axis = "class" | "teacher" | "room";
 
 const AXIS_LABEL: Record<Axis, string> = { class: "체험반", teacher: "강사", room: "체험존" };
@@ -39,15 +57,20 @@ const TIME_LIMITS = [
   { label: "오래 (30초)", ms: 30000 },
 ];
 
-export default function ResultPanel({ data }: Props) {
+const ownerOf = (a: Assignment, axis: Axis): string | null =>
+  axis === "class" ? a.classId : axis === "teacher" ? a.teacherId : a.roomId;
+
+export default function ResultPanel({ data, set }: Props) {
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState<string>("");
-  const [result, setResult] = useState<SolveResult | null>(null);
-  const [solved, setSolved] = useState<{ lectures: Lecture[]; data: AppData } | null>(null);
+  const [progress, setProgress] = useState("");
+  const [solveInfo, setSolveInfo] = useState<{ result: SolveResult; lectures: Lecture[] } | null>(null);
   const [view, setView] = useState<Axis>("class");
   const [kind, setKind] = useState<Axis>("class");
   const [query, setQuery] = useState("");
   const [limitMs, setLimitMs] = useState(10000);
+  const [editing, setEditing] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [roundId, setRoundId] = useState<string>(BASE_ROUND.id);
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
@@ -56,9 +79,32 @@ export default function ResultPanel({ data }: Props) {
   const errors = issues.filter((i) => i.level === "error");
   const warns = issues.filter((i) => i.level === "warn");
 
+  const periods = periodsOf(data.slots);
+  const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
+
+  /** ── 회차(로테이션) ─────────────────────────────── */
+  const rounds = data.rotation.rounds;
+  const round = rounds.find((r) => r.id === roundId) ?? BASE_ROUND;
+  const isBase = round.step === 0 || data.rotation.groups.length === 0;
+  const displayed = useMemo(
+    () => rotateAssignments(data.timetable, data.rotation.groups, round.step),
+    [data.timetable, data.rotation.groups, round.step],
+  );
+
+  /** 로테이션을 입힌 화면은 파생물이라 고칠 수 없다 — 기준안일 때만 편집한다. */
+  const canEdit = editing && isBase;
+
+  const conflicts = useMemo(() => conflictsOf(data, displayed), [data, displayed]);
+  const badIds = useMemo(() => new Set(conflicts.flatMap((c) => c.ids)), [conflicts]);
+  const grids = useMemo(() => buildGrids(data, displayed, badIds), [data, displayed, badIds]);
+
+  const selected = canEdit ? (data.timetable.find((a) => a.id === selectedId) ?? null) : null;
+
+  /** ── 자동 배치 ──────────────────────────────────── */
   const run = (seed: number) => {
+    if (data.timetable.length > 0 && !confirm("지금 구성된 시간표를 지우고 새로 배치합니다. 계속할까요?"))
+      return;
     workerRef.current?.terminate();
-    const periods = periodsOf(data.slots);
     const P = periods.length;
     const lectures = buildLectures(data);
     const req: SolveRequest = {
@@ -85,7 +131,8 @@ export default function ResultPanel({ data }: Props) {
     workerRef.current = worker;
     setRunning(true);
     setProgress("배치 중…");
-    setResult(null);
+    setSolveInfo(null);
+    setSelectedId(null);
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
       const msg = e.data;
       if (msg.type === "progress") {
@@ -94,8 +141,9 @@ export default function ResultPanel({ data }: Props) {
         );
         return;
       }
-      setResult(msg);
-      setSolved({ lectures, data });
+      setSolveInfo({ result: msg, lectures });
+      set((d) => ({ ...d, timetable: fromSolveResult(msg, lectures) }));
+      setRoundId(BASE_ROUND.id);
       setRunning(false);
       setProgress("");
       worker.terminate();
@@ -111,94 +159,75 @@ export default function ResultPanel({ data }: Props) {
     setProgress("");
   };
 
-  const snap = solved?.data ?? data;
-  const lectures = solved?.lectures ?? [];
-  const periods = periodsOf(snap.slots);
-  const teacherName = new Map(snap.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
-  const className = new Map(snap.classes.map((c) => [c.id, c.name || "(이름없음)"]));
-  const roomName = new Map(snap.rooms.map((r) => [r.id, r.name]));
+  /** ── 편집 동작 ──────────────────────────────────── */
+  const putTimetable = (fn: (list: Assignment[]) => Assignment[]) =>
+    set((d) => ({ ...d, timetable: fn(d.timetable) }));
 
-  const grids = useMemo(() => {
-    const byClass = new Map<string, Grid>();
-    const byTeacher = new Map<string, Grid>();
-    const byRoom = new Map<string, Grid>();
-    if (!result || !solved) return { byClass, byTeacher, byRoom };
-
-    const blank = (): Grid =>
-      Array.from({ length: periods.length }, () => new Array(snap.days.length).fill(null));
-    for (const c of snap.classes) byClass.set(c.id, blank());
-    for (const t of snap.teachers) byTeacher.set(t.id, blank());
-    for (const r of snap.rooms) byRoom.set(r.id, blank());
-
-    for (const unit of result.placed) {
-      const lec = solved.lectures[unit.lectureIndex];
-      if (!lec) continue;
-      const room = lec.roomId ? roomName.get(lec.roomId) : undefined;
-      const hue = hueOf(lec.subject);
-
-      const cls: Cell = {
-        top: lec.subject,
-        bottom: [teacherName.get(lec.teacherId), room].filter(Boolean).join(" · "),
-        span: unit.length,
-        hue,
-      };
-      const tch: Cell = {
-        top: className.get(lec.classId) ?? "",
-        bottom: [lec.subject, room].filter(Boolean).join(" · "),
-        span: unit.length,
-        hue,
-      };
-      const zone: Cell = {
-        top: className.get(lec.classId) ?? "",
-        bottom: [lec.subject, teacherName.get(lec.teacherId)].filter(Boolean).join(" · "),
-        span: unit.length,
-        hue,
-      };
-      const cg = byClass.get(lec.classId);
-      const tg = byTeacher.get(lec.teacherId);
-      const rg = lec.roomId ? byRoom.get(lec.roomId) : undefined;
-      if (cg) {
-        cg[unit.period][unit.day] = cls;
-        for (let k = 1; k < unit.length; k++) cg[unit.period + k][unit.day] = "cont";
-      }
-      if (tg) {
-        tg[unit.period][unit.day] = tch;
-        for (let k = 1; k < unit.length; k++) tg[unit.period + k][unit.day] = "cont";
-      }
-      if (rg) {
-        rg[unit.period][unit.day] = zone;
-        for (let k = 1; k < unit.length; k++) rg[unit.period + k][unit.day] = "cont";
-      }
+  const addAt = (ownerId: string, axis: Axis, day: number, period: number) => {
+    const classId = axis === "class" ? ownerId : (data.classes[0]?.id ?? "");
+    if (!classId) {
+      alert("먼저 [체험반·체험존] 탭에서 체험반을 만드세요.");
+      return;
     }
-    return { byClass, byTeacher, byRoom };
-  }, [result, solved]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const exportCsv = () => {
-    if (!result || !solved) return;
-    const rows: string[][] = [["체험반", "요일", "교시", "프로그램", "강사", "체험존", "연속"]];
-    const sorted = [...result.placed].sort(
-      (a, b) => a.day - b.day || a.period - b.period || a.lectureIndex - b.lectureIndex,
-    );
-    for (const u of sorted) {
-      const lec = solved.lectures[u.lectureIndex];
-      for (let k = 0; k < u.length; k++) {
-        rows.push([
-          className.get(lec.classId) ?? "",
-          snap.days[u.day] ?? "",
-          periods[u.period + k]?.label ?? "",
-          lec.subject,
-          teacherName.get(lec.teacherId) ?? "",
-          lec.roomId ? (roomName.get(lec.roomId) ?? "") : "",
-          u.length === 2 ? "블록" : "",
-        ]);
-      }
-    }
-    downloadText("시간표.csv", toCsv(rows), "text/csv;charset=utf-8");
+    const a = newAssignment({
+      classId,
+      teacherId: axis === "teacher" ? ownerId : null,
+      roomId: axis === "room" ? ownerId : null,
+      subject: "",
+      day,
+      period,
+      length: 1,
+    });
+    putTimetable((list) => sortAssignments([...list, a]));
+    setSelectedId(a.id);
   };
 
-  // ── 엑셀 내려받기 ─────────────────────────────────────
+  const moveInto = (ownerId: string, axis: Axis, id: string, day: number, period: number) => {
+    const moving = data.timetable.find((a) => a.id === id);
+    if (!moving) return;
+    const target = data.timetable.find(
+      (a) => a.id !== id && ownerOf(a, axis) === ownerId && a.day === day && periodsCovered(a).includes(period),
+    );
+
+    if (target) {
+      if (!fits(data, target.day, target.period, moving.length) || !fits(data, moving.day, moving.period, target.length)) {
+        alert("연속 2교시 자리가 맞지 않아 두 칸을 맞바꿀 수 없습니다.");
+        return;
+      }
+      putTimetable((list) => swapPositions(list, id, target.id));
+      setSelectedId(id);
+      return;
+    }
+    if (!fits(data, day, period, moving.length)) {
+      alert("연속 2교시로 붙일 수 없는 자리입니다(뒤에 점심·쉬는시간이 있거나 마지막 교시입니다).");
+      return;
+    }
+    putTimetable((list) => setPosition(list, id, day, period));
+    setSelectedId(id);
+  };
+
+  const hooksFor = (ownerId: string, axis: Axis): EditHooks | undefined =>
+    canEdit
+      ? {
+          selectedId,
+          onPick: setSelectedId,
+          onAddAt: (day, period) => addAt(ownerId, axis, day, period),
+          onMove: (id, day, period) => moveInto(ownerId, axis, id, day, period),
+        }
+      : undefined;
+
+  /** ── 내려받기 ───────────────────────────────────── */
+  const roundSuffix = isBase ? "" : ` (${round.name})`;
+
+  const exportCsv = () =>
+    downloadText(
+      `${safeFileName(data.schoolName || "시간표")} 목록${roundSuffix}.csv`,
+      toCsv(toTemplateRows(data, displayed)),
+      "text/csv;charset=utf-8",
+    );
+
   const targets: Target[] = (
-    kind === "class" ? snap.classes : kind === "teacher" ? snap.teachers : snap.rooms
+    kind === "class" ? data.classes : kind === "teacher" ? data.teachers : data.rooms
   ).map((x) => ({ id: x.id, name: x.name || "(이름없음)" }));
 
   const kindLabel = AXIS_LABEL[kind];
@@ -207,36 +236,68 @@ export default function ResultPanel({ data }: Props) {
   const exact = q ? targets.find((t) => t.name.toLowerCase() === q) : undefined;
   const match = exact ?? (hits.length === 1 ? hits[0] : null);
 
-  const gridOf = (id: string): Grid =>
-    (kind === "class" ? grids.byClass : kind === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ??
-    [];
+  const gridOf = (id: string, axis: Axis): Grid =>
+    (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
 
-  const head = snap.schoolName ? snap.schoolName + " " : "";
+  const head = data.schoolName ? data.schoolName + " " : "";
   const titleOf = (name: string) =>
-    kind === "teacher" ? `${head}${name} 강사 시간표` : `${head}${name} 시간표`;
+    `${head}${kind === "teacher" ? `${name} 강사` : name} 시간표${roundSuffix}`;
 
   const sheetOf = (t: Target, sheetName: string): XSheet =>
     toSheet({
       sheetName,
       title: titleOf(t.name),
-      days: snap.days,
-      slots: snap.slots,
-      grid: gridOf(t.id),
+      days: data.days,
+      slots: data.slots,
+      grid: gridOf(t.id, kind),
     });
 
   const downloadOne = () => {
     if (!match) return;
     const label = kind === "teacher" ? `${match.name} 강사` : match.name;
-    downloadBlob(`${safeFileName(label)} 시간표.xlsx`, buildXlsx([sheetOf(match, match.name)]));
+    downloadBlob(`${safeFileName(label)} 시간표${roundSuffix}.xlsx`, buildXlsx([sheetOf(match, match.name)]));
   };
 
   const downloadAll = () => {
     if (targets.length === 0) return;
     const names = dedupe(targets.map((t) => t.name));
-    const sheets = targets.map((t, i) => sheetOf(t, names[i]));
-    const label = `${kindLabel}별`;
-    downloadBlob(`${safeFileName(snap.schoolName || "시간표")} ${label} 시간표.xlsx`, buildXlsx(sheets));
+    downloadBlob(
+      `${safeFileName(data.schoolName || "시간표")} ${kindLabel}별 시간표${roundSuffix}.xlsx`,
+      buildXlsx(targets.map((t, i) => sheetOf(t, names[i]))),
+    );
   };
+
+  /** 모든 회차 × 모든 대상을 한 파일에 — 로테이션 결과를 한꺼번에 나눠 줄 때 */
+  const downloadAllRounds = () => {
+    if (targets.length === 0 || rounds.length === 0) return;
+    const sheets: XSheet[] = [];
+    const names: string[] = [];
+    for (const r of rounds) {
+      const list = rotateAssignments(data.timetable, data.rotation.groups, r.step);
+      const g = buildGrids(data, list);
+      for (const t of targets) {
+        names.push(`${r.name} ${t.name}`);
+        sheets.push(
+          toSheet({
+            sheetName: `${r.name} ${t.name}`,
+            title: `${head}${kind === "teacher" ? `${t.name} 강사` : t.name} 시간표 (${r.name})`,
+            days: data.days,
+            slots: data.slots,
+            grid:
+              (kind === "class" ? g.byClass : kind === "teacher" ? g.byTeacher : g.byRoom).get(t.id) ?? [],
+          }),
+        );
+      }
+    }
+    const unique = dedupe(names);
+    downloadBlob(
+      `${safeFileName(data.schoolName || "시간표")} ${kindLabel}별 회차 전체.xlsx`,
+      buildXlsx(sheets.map((s, i) => ({ ...s, name: unique[i].slice(0, 31) }))),
+    );
+  };
+
+  const hasTimetable = data.timetable.length > 0;
+  const viewTargets = view === "class" ? data.classes : view === "teacher" ? data.teachers : data.rooms;
 
   return (
     <div className="flex flex-col gap-5">
@@ -258,21 +319,39 @@ export default function ResultPanel({ data }: Props) {
             ))}
           </select>
           <Button variant="primary" disabled={running || errors.length > 0} onClick={() => run(Date.now() % 100000)}>
-            {running ? "배치 중…" : "시간표 만들기"}
+            {running ? "배치 중…" : "자동으로 시간표 만들기"}
           </Button>
-          {result && !running && (
+          {hasTimetable && !running && (
             <Button onClick={() => run(Math.floor(Math.random() * 100000))}>다른 안으로 다시 배치</Button>
           )}
-          {running && <Button variant="danger" onClick={stop}>중지</Button>}
+          {!hasTimetable && !running && (
+            <Button
+              variant={editing ? "primary" : "ghost"}
+              onClick={() => {
+                setEditing((v) => !v);
+                setView("class");
+              }}
+            >
+              {editing ? "직접 입력 끝내기" : "빈 시간표에 직접 입력"}
+            </Button>
+          )}
+          {running && (
+            <Button variant="danger" onClick={stop}>
+              중지
+            </Button>
+          )}
           {progress && <span className="text-sm text-tt-600">{progress}</span>}
         </div>
 
         {errors.length > 0 && (
-          <ul className="mt-4 space-y-1 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            {errors.map((i, n) => (
-              <li key={n}>• {i.text}</li>
-            ))}
-          </ul>
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            <p className="mb-1 font-semibold">자동 배치를 하려면 먼저 고쳐야 합니다 (엑셀 올리기·직접 입력에는 상관없습니다)</p>
+            <ul className="space-y-1">
+              {errors.map((i, n) => (
+                <li key={n}>• {i.text}</li>
+              ))}
+            </ul>
+          </div>
         )}
         {warns.length > 0 && (
           <ul className="mt-3 space-y-1 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -284,28 +363,32 @@ export default function ResultPanel({ data }: Props) {
         )}
       </Card>
 
-      {result && solved && (
+      <ImportPanel data={data} set={set} />
+
+      {hasTimetable && (
         <>
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p
-                className={`text-sm font-semibold ${result.ok ? "text-emerald-700" : "text-amber-700"}`}
-              >
-                {result.ok ? "✔ " : "⚠ "}
-                {result.message}
-                <span className="ml-2 font-normal text-tt-500">
-                  {(result.elapsedMs / 1000).toFixed(1)}초 · 다시 시도 {result.restarts}회
-                </span>
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                {solveInfo && (
+                  <p className={`text-sm font-semibold ${solveInfo.result.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                    {solveInfo.result.ok ? "✔ " : "⚠ "}
+                    {solveInfo.result.message}
+                    <span className="ml-2 font-normal text-tt-500">
+                      {(solveInfo.result.elapsedMs / 1000).toFixed(1)}초 · 다시 시도 {solveInfo.result.restarts}회
+                    </span>
+                  </p>
+                )}
+                <p className="text-sm text-tt-600">배치된 칸 {data.timetable.length}개</p>
+              </div>
+
               <div className="no-print flex flex-wrap gap-2">
                 {(["class", "teacher", "room"] as const).map((a) => (
                   <Button
                     key={a}
                     variant={view === a ? "primary" : "ghost"}
-                    disabled={a === "room" && snap.rooms.length === 0}
-                    title={
-                      a === "room" && snap.rooms.length === 0 ? "지정된 체험존이 없습니다" : undefined
-                    }
+                    disabled={a === "room" && data.rooms.length === 0}
+                    title={a === "room" && data.rooms.length === 0 ? "지정된 체험존이 없습니다" : undefined}
                     onClick={() => {
                       setView(a);
                       setKind(a);
@@ -315,30 +398,129 @@ export default function ResultPanel({ data }: Props) {
                     {AXIS_LABEL[a]}별
                   </Button>
                 ))}
+                <Button variant={editing ? "primary" : "ghost"} onClick={() => setEditing((v) => !v)}>
+                  {editing ? "편집 끝내기" : "시간표 수정"}
+                </Button>
                 <Button onClick={() => window.print()}>인쇄 / PDF</Button>
               </div>
             </div>
 
-            {result.shortfalls.length > 0 && (
+            {rounds.length > 0 && (
+              <div className="no-print mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-tt-200 bg-tt-50 p-3">
+                <div className="w-48">
+                  <Field label="로테이션 회차">
+                    <select
+                      value={round.id}
+                      onChange={(e) => {
+                        setRoundId(e.target.value);
+                        setSelectedId(null);
+                      }}
+                      className="w-full rounded-lg border border-tt-300 bg-white px-2.5 py-1.5 text-sm"
+                    >
+                      <option value={BASE_ROUND.id}>{BASE_ROUND.name}</option>
+                      {rounds.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name} ({r.step}칸 이동)
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <p className="flex-1 text-sm text-tt-600">
+                  {isBase
+                    ? "지금은 기준 시간표입니다. 회차를 고르면 담당 강사만 바뀐 시간표를 볼 수 있습니다."
+                    : `${round.name} — 시간표는 그대로, 담당 강사만 ${round.step}칸 밀었습니다. 이 화면은 파생물이라 고칠 수 없습니다.`}
+                </p>
+                {!isBase && (
+                  <Button
+                    onClick={() => {
+                      if (!confirm(`${round.name}의 강사 배치를 기준 시간표로 확정합니다. 계속할까요?`)) return;
+                      set((d) => ({ ...d, timetable: displayed }));
+                      setRoundId(BASE_ROUND.id);
+                    }}
+                  >
+                    이 회차를 기준안으로 확정
+                  </Button>
+                )}
+              </div>
+            )}
+
+            {editing && !isBase && (
+              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                회차 화면에서는 고칠 수 없습니다. 위에서 <b>기준안</b>을 고르고 수정하세요.
+              </p>
+            )}
+
+            {canEdit && (
+              <p className="mt-3 rounded-lg border border-tt-300 bg-tt-50 p-3 text-sm text-tt-700">
+                칸을 눌러 내용을 고치고, 끌어다 놓아 자리를 옮깁니다. 이미 찬 자리에 놓으면 두 칸이 맞바뀝니다.
+                빈 칸의 <b>+</b> 를 누르면 새 칸이 생깁니다.
+              </p>
+            )}
+
+            {conflicts.length > 0 && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
+                <p className="mb-2 font-semibold text-red-700">
+                  겹치는 곳 {conflicts.length}건 — 표에서 빨갛게 표시됩니다
+                  {isBase && <span className="font-normal"> · 항목을 누르면 그 칸을 바로 고칠 수 있습니다</span>}
+                </p>
+                <ul className="space-y-1 text-red-700">
+                  {conflicts.slice(0, 10).map((c, i) => (
+                    <li key={i}>
+                      <button
+                        type="button"
+                        disabled={!isBase}
+                        onClick={() => {
+                          setEditing(true);
+                          setSelectedId(c.ids[c.ids.length - 1]);
+                        }}
+                        className="text-left underline-offset-2 hover:underline disabled:no-underline"
+                      >
+                        <b>[{conflictLabel(c.kind)}]</b> {c.text}
+                      </button>
+                    </li>
+                  ))}
+                  {conflicts.length > 10 && <li className="text-red-500">…외 {conflicts.length - 10}건</li>}
+                </ul>
+              </div>
+            )}
+
+            {solveInfo && solveInfo.result.shortfalls.length > 0 && (
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
-                <p className="mb-2 font-semibold text-amber-800">배치하지 못한 시수</p>
+                <p className="mb-2 font-semibold text-amber-800">자동 배치가 넣지 못한 시수</p>
                 <ul className="space-y-1 text-amber-800">
-                  {result.shortfalls.map((s) => {
-                    const lec = lectures[s.lectureIndex];
+                  {solveInfo.result.shortfalls.map((s) => {
+                    const lec = solveInfo.lectures[s.lectureIndex];
+                    if (!lec) return null;
                     return (
                       <li key={s.lectureIndex}>
                         <b>
                           {className.get(lec.classId)} {lec.subject}
                         </b>{" "}
-                        {s.missingHours}시간 —{" "}
-                        {s.reasons.map((r) => `${r.label} ${r.count}칸`).join(", ")}
+                        {s.missingHours}시간 — {s.reasons.map((r) => `${r.label} ${r.count}칸`).join(", ")}
                       </li>
                     );
                   })}
                 </ul>
+                <p className="mt-2 text-amber-700">
+                  [시간표 수정]을 켜고 빈 칸의 <b>+</b> 로 직접 넣을 수 있습니다.
+                </p>
               </div>
             )}
           </Card>
+
+          {selected && (
+            <AssignmentEditor
+              data={data}
+              value={selected}
+              onChange={(next) => putTimetable((list) => sortAssignments(upsert(list, next)))}
+              onDelete={() => {
+                putTimetable((list) => removeAssignment(list, selected.id));
+                setSelectedId(null);
+              }}
+              onClose={() => setSelectedId(null)}
+            />
+          )}
 
           <Card
             title="엑셀로 내려받기"
@@ -351,7 +533,7 @@ export default function ResultPanel({ data }: Props) {
                     <button
                       key={k}
                       type="button"
-                      disabled={k === "room" && snap.rooms.length === 0}
+                      disabled={k === "room" && data.rooms.length === 0}
                       onClick={() => {
                         setKind(k);
                         setQuery("");
@@ -369,10 +551,7 @@ export default function ResultPanel({ data }: Props) {
               </Field>
 
               <div className="w-60">
-                <Field
-                  label={`${kindLabel} 이름`}
-                  hint="일부만 입력해도 됩니다"
-                >
+                <Field label={`${kindLabel} 이름`} hint="일부만 입력해도 됩니다">
                   <TextInput
                     list="tt-download-targets"
                     value={query}
@@ -393,9 +572,12 @@ export default function ResultPanel({ data }: Props) {
               <Button variant="primary" disabled={!match} onClick={downloadOne}>
                 {match ? `${match.name} 시간표 받기` : "엑셀(.xlsx) 받기"}
               </Button>
-              <Button onClick={downloadAll}>
-                전체 {kindLabel} 한 파일로
-              </Button>
+              <Button onClick={downloadAll}>전체 {kindLabel} 한 파일로</Button>
+              {rounds.length > 0 && (
+                <Button onClick={downloadAllRounds} title="회차 × 대상마다 시트 한 장씩">
+                  회차 전체 한 파일로
+                </Button>
+              )}
               <Button onClick={exportCsv}>전체 목록 CSV</Button>
             </div>
 
@@ -410,47 +592,43 @@ export default function ResultPanel({ data }: Props) {
               </p>
             )}
           </Card>
-
-          <div className="grid gap-5 xl:grid-cols-2">
-            {(view === "class" ? snap.classes : view === "teacher" ? snap.teachers : snap.rooms).map(
-              (x) => {
-                const g =
-                  (view === "class"
-                    ? grids.byClass
-                    : view === "teacher"
-                      ? grids.byTeacher
-                      : grids.byRoom
-                  ).get(x.id) ?? [];
-                const used = g.flat().filter((cell) => cell !== null).length;
-                const name = x.name || "(이름없음)";
-                const capacity = periods.length * snap.days.length;
-                return (
-                  <Timetable
-                    key={x.id}
-                    title={
-                      view === "teacher"
-                        ? `${name} 강사`
-                        : `${snap.schoolName ? snap.schoolName + " " : ""}${name}`
-                    }
-                    subtitle={
-                      view === "class"
-                        ? `주 ${used}시간 · 빈 칸 ${capacity - used}`
-                        : view === "teacher"
-                          ? `주 ${used}시간`
-                          : `사용 ${used}/${capacity}칸 (${Math.round((used / capacity) * 100)}%)`
-                    }
-                    days={snap.days}
-                    slots={snap.slots}
-                    grid={g}
-                  />
-                );
-              },
-            )}
-          </div>
         </>
       )}
 
-      {!result && !running && <Empty>[시간표 만들기]를 누르면 배치를 시작합니다.</Empty>}
+      {(hasTimetable || canEdit) && (
+        <div className="grid gap-5 xl:grid-cols-2">
+          {viewTargets.map((x) => {
+            const g = gridOf(x.id, view);
+            const used = g.flat().filter((cell) => cell !== null).length;
+            const name = x.name || "(이름없음)";
+            const capacity = periods.length * data.days.length;
+            return (
+              <Timetable
+                key={x.id}
+                title={`${view === "teacher" ? `${name} 강사` : `${head}${name}`}${roundSuffix}`}
+                subtitle={
+                  view === "class"
+                    ? `주 ${used}시간 · 빈 칸 ${capacity - used}`
+                    : view === "teacher"
+                      ? `주 ${used}시간`
+                      : `사용 ${used}/${capacity}칸 (${capacity ? Math.round((used / capacity) * 100) : 0}%)`
+                }
+                days={data.days}
+                slots={data.slots}
+                grid={g}
+                edit={hooksFor(x.id, view)}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {!hasTimetable && !canEdit && !running && (
+        <Empty>
+          [자동으로 시간표 만들기]로 새로 짜거나, 위에서 이미 쓰고 있는 엑셀을 올리거나, [빈 시간표에 직접
+          입력]으로 손수 채울 수 있습니다.
+        </Empty>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppData } from "./types";
-import { defaultData, load, save } from "./store";
+import { defaultData, load, migrate, save } from "./store";
 import { sampleData } from "./sample";
 import { downloadText } from "./export";
 import SlotsPanel from "./components/SlotsPanel";
@@ -8,6 +8,7 @@ import ClassesPanel from "./components/ClassesPanel";
 import TeachersPanel from "./components/TeachersPanel";
 import CoursesPanel from "./components/CoursesPanel";
 import ResultPanel from "./components/ResultPanel";
+import RotationPanel from "./components/RotationPanel";
 import { Button } from "./components/ui";
 
 const TABS = [
@@ -16,6 +17,7 @@ const TABS = [
   { id: "teacher", label: "강사" },
   { id: "course", label: "프로그램 배정" },
   { id: "result", label: "시간표" },
+  { id: "rotation", label: "로테이션" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -35,9 +37,9 @@ export default function App() {
     file
       .text()
       .then((text) => {
-        const parsed = JSON.parse(text) as AppData;
-        if (!parsed || parsed.version !== 1) throw new Error("형식이 맞지 않습니다.");
-        setData({ ...defaultData(), ...parsed });
+        const parsed = migrate(JSON.parse(text));
+        if (!parsed) throw new Error("형식이 맞지 않습니다.");
+        setData(parsed);
       })
       .catch((e: unknown) => alert(`불러오기 실패: ${e instanceof Error ? e.message : String(e)}`));
   };
@@ -116,7 +118,8 @@ export default function App() {
         {tab === "class" && <ClassesPanel data={data} set={set} />}
         {tab === "teacher" && <TeachersPanel data={data} set={set} />}
         {tab === "course" && <CoursesPanel data={data} set={set} />}
-        {tab === "result" && <ResultPanel data={data} />}
+        {tab === "result" && <ResultPanel data={data} set={set} />}
+        {tab === "rotation" && <RotationPanel data={data} set={set} />}
       </main>
     </div>
   );
