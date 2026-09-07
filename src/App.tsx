@@ -55,6 +55,14 @@ export default function App() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <a
+              href="/manual.pdf"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
+            >
+              사용 설명서
+            </a>
             <Button
               onClick={() => {
                 if (confirm("예시 데이터를 불러옵니다. 지금 입력한 내용은 사라집니다.")) setData(sampleData());

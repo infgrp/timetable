@@ -20,6 +20,10 @@
 상주형(캠프반이 주 5일 머무는 구조)과 방문형(학급이 몇 교시만 다녀가는 구조) 둘 다 쓸 수 있다.
 방문형이면 빈 칸이 많이 남는데, 그건 경고 한 줄로만 알리고 배치는 그대로 진행한다.
 
+현장에서 쓰는 분들을 위한 **사용 설명서**는 앱 오른쪽 위 `[사용 설명서]` 버튼이나
+[timetable-chi-ten.vercel.app/manual.pdf](https://timetable-chi-ten.vercel.app/manual.pdf) 에 있다.
+원본은 `docs/manual.tex`(XeLaTeX), 결과물은 `public/manual.pdf` 로 커밋해 배포한다.
+
 ## 용어
 
 화면 용어와 코드의 타입 이름은 다음과 같이 대응한다.
@@ -161,6 +165,7 @@ npm run stress        # 30개 반 규모 부하 테스트 (HARD=1, EXTRA=1 로 �
 npm run xlsx:check    # 생성한 xlsx 가 열리는 파일인지 확인
 npm run import:check  # 내보낸 파일을 되읽어 같은 시간표가 나오는지 (CSV·xlsx 왕복), 충돌 검사, 로테이션
 npm run render:check  # 시간표·로테이션·편집 화면이 실제로 그려지는지 (서버 렌더링)
+npm run manual        # docs/manual.tex → public/manual.pdf (XeLaTeX + 맑은 고딕 필요)
 ```
 
 ## 개발

@@ -4,5 +4,13 @@ dist
 *.local
 .DS_Store
 scripts/*.mjs
+!scripts/manual.mjs
 xlsx_check.xlsx
 영어체험센터_예시.json
+
+# 설명서 — 원본은 docs/manual.tex, 배포되는 결과물은 public/manual.pdf 뿐이다.
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.pdf

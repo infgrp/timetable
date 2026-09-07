@@ -1,0 +1,696 @@
+% =====================================================================
+%  영어체험센터 시간표 작성기 — 사용 설명서
+%
+%  컴파일:  xelatex -interaction=nonstopmode manual.tex   (두 번: 목차 때문)
+%  또는:    npm run manual   (public/manual.pdf 로 떨어진다)
+%
+%  글꼴은 윈도우에 기본으로 있는 맑은 고딕·Consolas 를 쓴다.
+%  다른 환경에서 컴파일하려면 아래 \setmainfont 계열만 바꾸면 된다.
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{kotex}
+\usepackage{fontspec}
+\setmainfont{Malgun Gothic}[Ligatures=TeX]
+\setsansfont{Malgun Gothic}
+\setmonofont{Consolas}[Scale=MatchLowercase]
+\setmainhangulfont{Malgun Gothic}
+\setsanshangulfont{Malgun Gothic}
+\setmonohangulfont{Malgun Gothic}[Scale=MatchLowercase]
+
+\usepackage[a4paper,margin=24mm,top=26mm,bottom=26mm]{geometry}
+% 문단 들여쓰기 대신 줄 간격으로 문단을 나눈다 —
+% 목록 바로 뒤에 오는 문단이 목록 항목처럼 보이는 것을 막는다.
+\usepackage{parskip}
+\usepackage[table]{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage[most]{tcolorbox}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc}
+\usepackage[hidelinks]{hyperref}
+
+% ── 색 (앱 화면과 같은 팔레트) ──────────────────────────────────────
+\definecolor{ttblue}{HTML}{2C60A3}
+\definecolor{ttdark}{HTML}{1D3D69}
+\definecolor{ttmid}{HTML}{5A94D8}
+\definecolor{ttlight}{HTML}{EEF4FB}
+\definecolor{ttline}{HTML}{B3CFEF}
+\definecolor{ttgray}{HTML}{6B7A8F}
+\definecolor{warnbg}{HTML}{FEF3C7}
+\definecolor{warnln}{HTML}{D97706}
+\definecolor{dangerbg}{HTML}{FEE2E2}
+\definecolor{dangerln}{HTML}{DC2626}
+\definecolor{okbg}{HTML}{DCFCE7}
+\definecolor{okln}{HTML}{15803D}
+
+\hypersetup{
+  colorlinks=true, linkcolor=ttblue, urlcolor=ttblue,
+  pdftitle={영어체험센터 시간표 작성기 사용 설명서},
+  pdfauthor={영어체험센터}
+}
+
+% ── 제목 모양 ───────────────────────────────────────────────────────
+\titleformat{\section}
+  {\color{ttdark}\sffamily\bfseries\Large}{\thesection}{0.6em}{}
+  [\vspace{-0.5em}\color{ttline}\rule{\linewidth}{0.8pt}]
+\titleformat{\subsection}
+  {\color{ttblue}\sffamily\bfseries\large}{\thesubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.8em}
+\titlespacing*{\subsection}{0pt}{1.2em}{0.5em}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\footnotesize\color{ttgray} 영어체험센터 시간표 작성기}
+\fancyhead[R]{\footnotesize\color{ttgray} 사용 설명서}
+\fancyfoot[C]{\footnotesize\color{ttgray}\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{ttline}\leaders\hrule height \headrulewidth\hfill}}
+
+\setlist[itemize]{leftmargin=1.2em,itemsep=0.25em,topsep=0.35em}
+\setlist[enumerate]{leftmargin=1.4em,itemsep=0.3em,topsep=0.35em}
+\renewcommand{\arraystretch}{1.25}
+
+% 목차는 제목 없이 항목만 — 제목과 밑줄은 본문에서 직접 그린다.
+\makeatletter
+\renewcommand\tableofcontents{\@starttoc{toc}}
+\makeatother
+
+% ── 안내 상자 ───────────────────────────────────────────────────────
+\newtcolorbox{tip}[1][]{
+  enhanced, breakable, colback=ttlight, colframe=ttblue,
+  boxrule=0pt, leftrule=3pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\sffamily\bfseries\small, coltitle=ttdark,
+  title={도움말}, #1}
+
+\newtcolorbox{warn}[1][]{
+  enhanced, breakable, colback=warnbg, colframe=warnln,
+  boxrule=0pt, leftrule=3pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\sffamily\bfseries\small, coltitle=warnln,
+  title={주의}, #1}
+
+\newtcolorbox{danger}[1][]{
+  enhanced, breakable, colback=dangerbg, colframe=dangerln,
+  boxrule=0pt, leftrule=3pt, arc=2pt, left=8pt, right=8pt, top=6pt, bottom=6pt,
+  fonttitle=\sffamily\bfseries\small, coltitle=dangerln,
+  title={꼭 알아 두세요}, #1}
+
+% ── 자잘한 매크로 ───────────────────────────────────────────────────
+\newcommand{\btn}[1]{\textcolor{ttdark}{\sffamily\bfseries[#1]}}   % 버튼
+\newcommand{\tab}[1]{\textcolor{ttblue}{\sffamily\bfseries#1}}      % 탭 이름
+\newcommand{\field}[1]{\textsf{#1}}                                 % 입력칸 이름
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+% 표 머리글 — 문서 전체에서 같은 모양을 쓴다.
+\newcommand{\hd}[1]{\textcolor{ttdark}{\sffamily\bfseries #1}}
+
+% =====================================================================
+\begin{document}
+
+% ── 표지 ────────────────────────────────────────────────────────────
+\begin{titlepage}
+\thispagestyle{empty}
+\vspace*{2.2cm}
+\begin{center}
+{\color{ttline}\rule{0.72\linewidth}{1.2pt}}\\[1.6em]
+{\sffamily\bfseries\fontsize{30}{36}\selectfont\color{ttdark} 영어체험센터\\[0.35em] 시간표 작성기}\\[1.2em]
+{\sffamily\Large\color{ttblue} 사용 설명서}\\[1.4em]
+{\color{ttline}\rule{0.72\linewidth}{1.2pt}}\\[2.6em]
+
+\begin{tcolorbox}[width=0.78\linewidth, colback=ttlight, colframe=ttline,
+                  arc=4pt, boxrule=1pt, halign=center]
+{\sffamily\bfseries\color{ttdark} 접속 주소}\\[0.4em]
+{\large\url{https://timetable-chi-ten.vercel.app}}\\[0.8em]
+{\small\color{ttgray} 설치할 것이 없습니다. 인터넷 브라우저에서 주소만 열면 됩니다.}
+\end{tcolorbox}
+
+\vfill
+{\small\color{ttgray} 2026년 9월판 \quad·\quad 앱 버전 0.1}
+\end{center}
+\end{titlepage}
+
+% ── 목차 ────────────────────────────────────────────────────────────
+\thispagestyle{empty}
+{\color{ttdark}\sffamily\bfseries\Large 차례}\\[-0.4em]
+{\color{ttline}\rule{\linewidth}{0.8pt}}
+\vspace{0.4em}
+{\small\tableofcontents}
+\newpage
+\setcounter{page}{1}
+
+% =====================================================================
+\section{이 프로그램은 무엇인가}
+
+강사·프로그램·주당 시수·못 들어가는 시간을 넣으면 \textbf{체험반별 시간표를 자동으로 짜 주는} 웹 프로그램입니다.
+체험존이 같은 교시에 겹치지 않도록 잡아 주는 것이 핵심입니다.
+
+시간표를 만드는 길은 세 가지이고, 어느 쪽으로 만들었든 그다음은 똑같습니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+자동 배치 & 입력해 둔 프로그램 배정으로 프로그램이 새로 짜 줍니다. \\
+엑셀 올리기 & \textbf{이미 쓰고 계신 시간표}를 엑셀 파일 그대로 올립니다. \\
+직접 입력 & 빈 표에서 칸을 하나씩 손으로 채웁니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+만들어진 시간표는 \textbf{손으로 고칠 수 있고}, \textbf{회차마다 담당 강사만 바뀌는 로테이션}을 입혀 볼 수 있습니다.
+
+\begin{danger}
+입력한 내용은 \textbf{지금 쓰는 브라우저 안에만} 저장됩니다. 서버로 보내지 않습니다.
+\begin{itemize}
+  \item 다른 컴퓨터나 다른 브라우저에서 열면 \textbf{아무것도 없는 상태}로 시작합니다.
+  \item 브라우저 기록·캐시를 지우면 \textbf{입력한 내용도 함께 사라집니다.}
+  \item 그래서 중요한 작업은 \btn{내보내기}로 파일을 꼭 받아 두세요
+        (\ref{sec:backup}절 참고). 다른 컴퓨터에서 이어서 하실 때도 이 파일을 씁니다.
+\end{itemize}
+\end{danger}
+
+\subsection{화면 용어}
+
+설명서와 화면에서 쓰는 말은 다음과 같습니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+체험반 & 시간표 한 장이 나오는 단위입니다. 캠프반일 수도 있고 방문하는 학급일 수도 있습니다. \\
+체험존 & 같은 교시에 한 팀만 들어갈 수 있는 공간입니다. 보통 여기가 가장 먼저 막힙니다. \\
+강사 & 원어민·한국인 강사입니다. \\
+프로그램 배정 & 한 강사가 한 프로그램을 여러 체험반에 맡는 단위입니다. \\
+교시 & 프로그램이 들어가는 칸입니다. 점심시간·쉬는시간은 교시로 세지 않습니다. \\
+연속 2교시 & 붙어 있는 두 교시를 한 수업으로 쓰는 것입니다. 화면에서는 두 칸이 하나로 합쳐집니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{화면 구성}
+
+위쪽에 탭이 여섯 개 있습니다. 왼쪽부터 차례로 채워 나가면 됩니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttblue}}l X@{}}
+\toprule
+운영 시간 & 운영 요일, 교시 시각, 점심·쉬는시간 \\
+체험반·체험존 & 체험반 목록, 체험존 목록 \\
+강사 & 강사 목록, 강사별로 못 들어가는 시간 \\
+프로그램 배정 & 누가 · 무엇을 · 어느 반에 · 주 몇 시간 · 어느 존에서 \\
+시간표 & 시간표 만들기 · 엑셀 올리기 · 고치기 · 내려받기 \\
+로테이션 & 강사가 돌아가며 맡는 규칙 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+화면 맨 위 오른쪽에는 어디서든 쓸 수 있는 버튼이 있습니다.
+
+\begin{itemize}
+  \item \btn{예시 데이터} — 어떻게 생겼는지 보려고 넣어 둔 견본입니다. \textbf{지금 입력한 내용은 사라집니다.}
+  \item \btn{내보내기} / \btn{불러오기} — 입력한 전부를 파일 하나로 저장하고 되살립니다.
+  \item \btn{초기화} — 전부 지우고 처음 상태로 돌아갑니다.
+\end{itemize}
+
+\begin{tip}
+처음이시라면 \btn{예시 데이터}를 눌러 한 바퀴 둘러보신 뒤 \btn{초기화}하고 시작하시는 것을 권합니다.
+\end{tip}
+
+% =====================================================================
+\section{빠르게 시작하기}
+
+\subsection{길 1 — 이미 쓰던 시간표를 그대로 올리기}
+
+가장 빠른 길입니다. 이미 엑셀로 시간표를 관리하고 계셨다면 여기서 시작하세요.
+
+\begin{enumerate}
+  \item \tab{운영 시간} 탭에서 운영 요일과 교시 수를 실제와 맞춥니다.
+  \item \tab{시간표} 탭 → \btn{양식 받기}로 빈 서식을 내려받습니다.
+  \item 엑셀에서 쓰시던 시간표를 그 서식의 열에 맞춰 채웁니다.
+  \item 같은 화면에서 그 파일을 올립니다. 몇 칸을 읽었는지 먼저 보여 준 다음 반영합니다.
+\end{enumerate}
+
+자세한 내용은 \ref{sec:upload}절에 있습니다.
+
+\subsection{길 2 — 처음부터 자동으로 짜기}
+
+\begin{enumerate}
+  \item \tab{운영 시간} — 요일, 교시 수, 시작 시각, 점심시간
+  \item \tab{체험반·체험존} — 체험반과 체험존 만들기
+  \item \tab{강사} — 강사 이름 넣고, 못 들어가는 시간 칠하기
+  \item \tab{프로그램 배정} — 누가 무엇을 어느 반에 주 몇 시간
+  \item \tab{시간표} → \btn{자동으로 시간표 만들기}
+\end{enumerate}
+
+\subsection{길 3 — 빈 표에 손으로 채우기}
+
+\tab{시간표} 탭에서 \btn{빈 시간표에 직접 입력}을 누르면 빈 표가 나옵니다.
+빈 칸의 \btn{+}를 눌러 하나씩 채우면 됩니다. \ref{sec:edit}절과 같은 방법입니다.
+
+% =====================================================================
+\section{입력하기}
+
+\subsection{운영 시간}
+
+\begin{itemize}
+  \item \textbf{운영 요일} — 실제로 운영하는 요일만 켭니다.
+  \item \textbf{교시} — 1교시 시작 시각, 한 교시 길이, 쉬는시간 길이, 교시 수를 넣으면 표가 한 번에 만들어집니다.
+        기본값은 09:00 시작 · 40분 · 6교시입니다.
+  \item \textbf{점심시간} — 몇 교시 뒤에 넣을지 고릅니다.
+\end{itemize}
+
+\begin{warn}
+점심시간·쉬는시간이 들어간 자리는 \textbf{연속 2교시로 붙일 수 없습니다.}
+예를 들어 4교시 뒤에 점심이 있으면 ``4--5교시 연속''은 만들 수 없습니다.
+\end{warn}
+
+\subsection{체험반·체험존}
+
+체험반은 \code{A반\textasciitilde F반}, \code{1반\textasciitilde 6반}, \code{3-1\textasciitilde 3-6} 같은 묶음을 한 번에 만들 수 있습니다.
+
+체험존은 자주 쓰는 존을 한 번에 추가할 수 있습니다. 체험존을 지정해 두면 \textbf{같은 존에 두 반이 동시에 들어가는 일}을 프로그램이 막아 줍니다.
+
+\subsection{강사}
+
+이름은 줄바꿈이나 쉼표로 구분해 여러 명을 한 번에 붙여넣을 수 있습니다.
+
+강사를 고르면 오른쪽에 요일 × 교시 격자가 나옵니다. \textbf{그 강사가 들어갈 수 없는 칸}을 눌러 빨갛게 칠하세요.
+끌어서 여러 칸을 한 번에 칠할 수 있고, 요일이나 교시 머리글을 누르면 그 줄 전체가 한 번에 바뀝니다.
+
+\begin{tip}
+출장, 타 기관 출강, 정기 회의처럼 \textbf{매주 반복되는} 일정만 여기에 칠하세요.
+이번 주만 빠지는 일은 시간표를 만든 뒤 \ref{sec:edit}절 방법으로 그 칸만 고치는 편이 낫습니다.
+\end{tip}
+
+\subsection{프로그램 배정}
+
+한 줄이 ``어느 강사가 · 어떤 프로그램을 · 어느 체험반들에게 · 주 몇 시간'' 맡는지를 뜻합니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+강사 & 이 프로그램을 맡을 강사 \\
+프로그램 & 프로그램 이름 (예: \code{Airport \& Immigration}) \\
+체험반 & 이 프로그램을 받을 반들. 여러 반을 한꺼번에 고를 수 있습니다. \\
+주당 시수 & \textbf{반 하나당} 일주일에 몇 시간인지 \\
+연속 2교시 & 그중 몇 번을 붙여서 할지 \\
+체험존 & 이 프로그램이 쓰는 존 (없으면 비워 둡니다) \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+이 탭 아래에 \textbf{체험존 사용률} 막대가 있습니다. 존 하나가 일주일에 쓸 수 있는 칸은 ``교시 수 × 요일 수''뿐이라,
+여기가 100\%에 가까워지면 시간표를 짜기가 급격히 어려워집니다. 85\%를 넘으면 미리 알려 줍니다.
+
+\begin{tip}
+배치가 자꾸 실패한다면 대개 \textbf{체험존이 모자란 것}입니다. 사용률 막대를 먼저 보세요.
+\end{tip}
+
+% =====================================================================
+\section{자동으로 시간표 만들기}
+
+\tab{시간표} 탭에서 걸리는 시간을 고르고 \btn{자동으로 시간표 만들기}를 누릅니다.
+계산은 전부 이 컴퓨터 안에서 일어나고, 도는 동안에도 화면은 멈추지 않습니다.
+
+마음에 들지 않으면 \btn{다른 안으로 다시 배치}를 눌러 다른 답을 받을 수 있습니다.
+
+\begin{warn}
+자동 배치는 \textbf{지금 있는 시간표를 지우고 새로 짭니다.} 누르면 확인 창이 한 번 뜹니다.
+손으로 고쳐 둔 내용이 있다면 먼저 \btn{내보내기}로 받아 두세요.
+\end{warn}
+
+\subsection{프로그램이 지켜 주는 것}
+
+{\sffamily\bfseries\color{ttdark} 항상 지켜지는 것}
+\begin{itemize}
+  \item 한 체험반은 한 교시에 한 프로그램만 합니다.
+  \item 연속 2교시는 실제로 붙어 있는 두 교시에만 들어갑니다(점심·쉬는시간을 넘지 않습니다).
+\end{itemize}
+
+{\sffamily\bfseries\color{ttdark} 0이 되도록 몰아가는 것}
+\begin{itemize}
+  \item 한 강사가 같은 교시에 두 반에 들어가지 않습니다.
+  \item 강사가 못 들어간다고 칠해 둔 시간에는 넣지 않습니다.
+  \item 같은 반의 같은 프로그램은 하루에 한 번만 합니다(연속 2교시는 한 번으로 셉니다).
+  \item 같은 체험존을 같은 교시에 두 반이 쓰지 않습니다.
+\end{itemize}
+
+\subsection{빨간 글씨가 나올 때}
+
+배치 버튼 아래 빨간 상자는 \textbf{자동 배치를 하려면 먼저 고쳐야 하는} 것들입니다.
+엑셀 올리기나 직접 입력에는 상관없습니다. 흔한 것들:
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.42\linewidth} X@{}}
+\toprule
+\hd{나오는 말} & \hd{이렇게 하세요} \\
+\midrule
+총 시수가 주당 운영 칸을 넘습니다 & 시수를 줄이거나 교시·요일을 늘립니다. \\
+회피 시간을 뺀 칸보다 많습니다 & 그 강사의 못 들어가는 시간을 줄이거나 시수를 나눕니다. \\
+존에 주당 칸이 몰려 있습니다 & 존을 늘리거나, 일부 프로그램의 존 지정을 뺍니다. \\
+하루 1회 규칙 때문에 & 연속 2교시 횟수를 늘리거나 시수를 줄입니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{배치하지 못한 시수}
+
+시간 안에 전부 넣지 못하면 \textbf{겹치는 곳 없는 시간표 + 못 넣은 목록}을 돌려줍니다.
+목록에는 ``강사 회피 시간 7칸 / 강사가 다른 반 수업 중 5칸''처럼 \textbf{왜 막혔는지}가 함께 적힙니다.
+
+남은 것은 \btn{시간표 수정}을 켜고 빈 칸의 \btn{+}로 직접 밀어 넣으시면 됩니다.
+
+% =====================================================================
+\section{이미 쓰던 시간표 올리기}\label{sec:upload}
+
+\tab{시간표} 탭의 \textbf{``엑셀로 이미 짜인 시간표 올리기''}에서 \code{.xlsx} 또는 \code{.csv} 파일을 올립니다.
+
+\subsection{양식(목록형) — 권장}
+
+\btn{양식 받기}를 누르면 지금 입력값이 예시로 채워진 빈 서식이 내려옵니다. 한 줄이 한 칸입니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l >{\raggedright\arraybackslash}p{0.13\linewidth} X@{}}
+\toprule
+\hd{열} & \hd{필수} & \hd{설명} \\
+\midrule
+체험반 & 필수 & 없는 이름이면 새로 만듭니다. \\
+요일   & 필수 & \code{월}, \code{월요일}, \code{Mon} 모두 알아봅니다. \\
+교시   & 필수 & \code{3교시}, \code{3}, \code{10:40} 모두 알아봅니다. \\
+프로그램 & & 프로그램 이름 \\
+강사   & & 없는 이름이면 새로 만듭니다. 비워 두면 ``미지정''입니다. \\
+체험존 & & 없는 이름이면 새로 만듭니다. \\
+연속   & & 연속 2교시면 \textbf{두 줄}로 적고 두 줄 모두에 \code{블록}이라고 씁니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\medskip
+예를 들어 A반이 월요일 1--2교시에 연속으로 \code{Airport \& Immigration}을 한다면 이렇게 두 줄입니다.
+
+\begin{center}
+\small
+\begin{tabular}{@{}llllll@{}}
+\toprule
+\hd{체험반} & \hd{요일} & \hd{교시} & \hd{프로그램} & \hd{강사} & \hd{연속} \\
+\midrule
+A반 & 월 & 1교시 & Airport \& Immigration & Emma Clark & 블록 \\
+A반 & 월 & 2교시 & Airport \& Immigration & Emma Clark & 블록 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{시간표형}
+
+이 프로그램이 내보낸 \textbf{체험반별 시트} 모양 그대로도 읽습니다.
+시트 이름이 체험반 이름이 되고, 세로로 합쳐진 칸은 연속 2교시로 되살아납니다.
+
+즉 \textbf{내려받기 → 엑셀에서 손보기 → 다시 올리기}가 그대로 왕복합니다.
+엑셀이 손에 익으신 분은 이 방법이 편할 수 있습니다.
+
+\subsection{올리면 무슨 일이 일어나나}
+
+파일을 고르면 바로 반영하지 않고 \textbf{먼저 보여 줍니다.} 몇 칸을 읽었는지, 무엇이 새로 생기는지,
+문제가 있으면 어떤 문제인지 확인한 뒤 고르세요.
+
+\begin{itemize}
+  \item \btn{지금 시간표를 이걸로 바꾸기} — 기존 것을 지우고 올린 것만 남깁니다.
+  \item \btn{기존 시간표에 합치기} — 둘을 합칩니다. 같은 반의 같은 자리는 \textbf{올린 쪽}이 이깁니다.
+\end{itemize}
+
+\begin{warn}
+\textbf{체험반·강사·체험존}은 이름이 처음 나오면 자동으로 만들어 줍니다.
+하지만 \textbf{요일과 교시는 자동으로 늘리지 않습니다.}
+파일에 토요일이 있는데 \tab{운영 시간}에서 토요일을 켜 두지 않았다면 그 줄들은 건너뛰고,
+몇 줄을 건너뛰었는지 알려 줍니다. \textbf{올리기 전에 요일과 교시 수를 먼저 맞춰 주세요.}
+\end{warn}
+
+\subsection{잘 안 읽힐 때}
+
+\begin{enumerate}
+  \item \textbf{열 이름을 확인하세요.} 첫 줄에 \code{체험반 요일 교시}가 있어야 목록형으로 알아봅니다.
+        \btn{양식 받기}로 받은 파일의 첫 줄을 그대로 쓰시는 것이 가장 확실합니다.
+  \item \textbf{요일·교시를 확인하세요.} \tab{운영 시간}에 없는 요일·교시는 건너뜁니다.
+  \item \textbf{엑셀이 아주 오래된 형식(\code{.xls})이면} 엑셀에서 \code{.xlsx}나 \code{.csv}로 다시 저장해 주세요.
+  \item \textbf{브라우저가 너무 오래되었으면} 엑셀 압축을 풀지 못한다는 말이 나옵니다.
+        크롬·엣지 최신판에서 열거나, \code{.csv}로 저장해 올리세요.
+\end{enumerate}
+
+% =====================================================================
+\section{시간표 고치기}\label{sec:edit}
+
+\btn{시간표 수정}을 누르면 그 자리에서 바로 고칠 수 있습니다. 다시 누르면 편집이 끝납니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}\raggedright\arraybackslash}p{0.3\linewidth} X@{}}
+\toprule
+칸을 끌어다 놓기 & 다른 자리로 옮깁니다. \textbf{이미 찬 자리}에 놓으면 두 칸이 서로 자리를 바꿉니다. \\
+칸을 누르기 & 아래에 편집 상자가 열립니다. 프로그램·강사·체험존·요일·교시·길이를 고치고, 삭제도 여기서 합니다. \\
+빈 칸의 \btn{+} & 새 칸을 만듭니다. 체험반별 화면이면 그 반이, 강사별 화면이면 그 강사가 미리 채워집니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+고치는 즉시 반영됩니다. 따로 저장 버튼은 없습니다.
+
+\subsection{겹치는 곳 읽는 법}
+
+손으로 고치다 보면 잠깐 겹치는 일이 생깁니다. 프로그램은 이것을 \textbf{막지 않습니다.}
+대신 겹친 칸을 표에서 빨갛게 칠하고, 위쪽에 목록으로 모아 보여 줍니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+체험반 겹침 & 한 반이 같은 교시에 두 가지를 합니다. \\
+강사 겹침 & 한 강사가 같은 교시에 두 반에 들어갑니다. \\
+체험존 겹침 & 한 존에 같은 교시에 두 반이 들어갑니다. \\
+강사 회피 시간 & 못 들어간다고 칠해 둔 시간에 수업이 잡혀 있습니다. \\
+자리 오류 & 운영 범위를 벗어났거나, 점심을 넘어 연속 2교시가 걸쳐 있습니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\begin{tip}
+\textbf{목록의 항목을 누르면 그 칸이 바로 편집 상태가 됩니다.}
+칸이 겹쳐서 표에 보이지 않을 때도 이 방법으로 찾아 고칠 수 있습니다.
+\end{tip}
+
+% =====================================================================
+\section{강사 로테이션}\label{sec:rotation}
+
+학기 내내 \textbf{시간표는 그대로 두고}, 회차(달)마다 \textbf{담당 강사만 한 칸씩 미는} 운영 방식을 위한 기능입니다.
+
+\begin{center}
+\begin{tcolorbox}[width=0.92\linewidth, colback=ttlight, colframe=ttline, arc=3pt, boxrule=1pt]
+9월에 A 선생님이 A 시간표, B 선생님이 B 시간표, C 선생님이 C 시간표를 맡았다면\\
+10월에는 A 선생님이 \textbf{B 시간표}, B 선생님이 \textbf{C 시간표}, C 선생님이 \textbf{A 시간표}를 맡습니다.
+\end{tcolorbox}
+\end{center}
+
+\vspace{0.6em}
+\begin{center}
+\begin{tikzpicture}[
+  slot/.style={draw=ttblue, fill=ttlight, rounded corners=4pt,
+               minimum width=28mm, minimum height=11mm, align=center,
+               font=\sffamily\bfseries\small, text=ttdark},
+  arr/.style={->, >={Stealth[length=3mm,width=2.4mm]}, very thick, ttmid},
+  lbl/.style={font=\footnotesize\sffamily, text=ttgray, fill=white, inner sep=2pt}
+]
+  \node[slot] (a) at (90:31mm)  {A 시간표};
+  \node[slot] (b) at (330:31mm) {B 시간표};
+  \node[slot] (c) at (210:31mm) {C 시간표};
+
+  \draw[arr] (a) to[bend left=18] node[lbl]{다음 회차} (b);
+  \draw[arr] (b) to[bend left=18] node[lbl]{다음 회차} (c);
+  \draw[arr] (c) to[bend left=18] node[lbl]{다음 회차} (a);
+\end{tikzpicture}
+
+{\footnotesize\sffamily\color{ttgray} 시간표는 자리에 그대로 있고, 강사만 화살표를 따라 옮겨 갑니다.}
+\end{center}
+
+\subsection{조 만들기}
+
+\tab{로테이션} 탭에서 \btn{+ 로테이션 조 추가}를 누르고, \textbf{같이 도는 강사를 순서대로} 넣습니다.
+
+\begin{danger}
+\textbf{넣은 순서가 곧 도는 순서입니다.} 위아래 화살표로 순서를 맞추세요.\\
+강사 전원이 한 덩어리로 돈다면 \btn{강사 전체를 한 조로}를 쓰면 한 번에 끝납니다.
+\end{danger}
+
+조는 여러 개 만들 수 있습니다. 예를 들어 존을 맡은 원어민 6명은 6명끼리 돌고,
+담임 영어 강사 2명은 둘이서 도는 식으로 나눌 수 있습니다.
+
+\subsection{회차 만들기}
+
+한 회차가 로테이션 한 칸입니다. \field{시작 월}을 넣고 \btn{3월부터 6개월치 만들기} 모양의 버튼을 누르면
+조 인원수만큼 회차가 한 번에 생깁니다(3명이면 3회차, 6명이면 6회차).
+이름과 이동 칸 수는 나중에 손으로 고칠 수 있습니다.
+
+아래쪽 \textbf{회차별 담당} 표에서 ``이 회차에 누가 누구의 시간표를 맡는지''를 미리 확인하세요.
+
+\subsection{회차 보고 내려받기}
+
+\tab{시간표} 탭 위쪽에 \field{로테이션 회차} 고르는 칸이 생깁니다. 회차를 고르면
+\textbf{시간표는 그대로인 채 담당 강사만 바뀐} 화면이 나오고, 그 상태로 그대로 내려받을 수 있습니다.
+
+\begin{itemize}
+  \item \textbf{기준안} — 지금 짜 둔 원래 시간표입니다.
+  \item \btn{회차 전체 한 파일로} — 회차 × 대상마다 시트 한 장씩 담긴 파일 하나를 받습니다
+        (\code{10월 Emma Clark} 식으로 이름이 붙습니다). 한 학기치를 한 번에 나눠 드릴 때 씁니다.
+  \item \btn{이 회차를 기준안으로 확정} — 그 회차의 강사 배치를 진짜 기준으로 굳힙니다.
+\end{itemize}
+
+\begin{warn}
+회차 화면은 기준안에서 \textbf{계산해 낸 화면}이라 고칠 수 없습니다.
+고치시려면 \field{로테이션 회차}를 \textbf{기준안}으로 되돌린 뒤 고치세요.
+그러면 모든 회차에 그 수정이 함께 반영됩니다.
+\end{warn}
+
+% =====================================================================
+\section{내려받기와 인쇄}
+
+시간표는 세 가지로 볼 수 있고, 보고 있는 그대로 받을 수 있습니다.
+
+\begin{itemize}
+  \item \textbf{체험반별} — 각 반이 무엇을 언제 하는지
+  \item \textbf{강사별} — 강사 개인 일정표
+  \item \textbf{체험존별} — 존을 언제 어느 반이 쓰는지 (운영에서 가장 자주 보는 화면)
+\end{itemize}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}\raggedright\arraybackslash}p{0.34\linewidth} X@{}}
+\toprule
+한 장만 & 구분을 고르고 이름을 넣으면 그 대상만 받습니다. 일부만 입력해도 됩니다
+  (\code{Emma} $\rightarrow$ \code{Emma Clark}). 여러 개가 걸리면 후보를 보여 줍니다. \\
+전체 (체험반·강사·체험존)별 한 파일로 & 대상마다 시트 한 장씩 담긴 파일 하나 \\
+회차 전체 한 파일로 & 로테이션 회차까지 모두 담은 파일 하나 \\
+전체 목록 CSV & 한 줄에 한 칸씩 펼친 목록. \textbf{업로드 양식과 같은 모양}이라 고쳐서 그대로 다시 올릴 수 있습니다. \\
+인쇄 / PDF & 화면 그대로 인쇄하거나 PDF로 저장합니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+엑셀 파일에는 연속 2교시 병합, 점심시간 띠, 프로그램별 색, 열 너비까지 표 모양 그대로 들어갑니다.
+
+\begin{tip}
+강사들께 개인 시간표를 나눠 드릴 때는 \textbf{강사별}로 보기를 바꾼 뒤
+\btn{전체 강사 한 파일로}를 받아 시트별로 보내시면 편합니다.
+\end{tip}
+
+% =====================================================================
+\section{저장·백업·되살리기}\label{sec:backup}
+
+\begin{danger}
+다시 한 번 강조합니다. 입력한 내용은 \textbf{지금 쓰는 브라우저 안에만} 있습니다.
+컴퓨터를 바꾸거나, 브라우저 기록을 지우거나, 시크릿 창으로 열면 남아 있지 않습니다.
+\end{danger}
+
+\subsection{백업하기}
+
+화면 오른쪽 위 \btn{내보내기}를 누르면 \code{시간표설정\_2026-09-07.json} 같은 파일이 내려옵니다.
+여기에는 운영 시간·체험반·체험존·강사·프로그램 배정·\textbf{짜 놓은 시간표}·\textbf{로테이션 설정}이 전부 들어 있습니다.
+
+\begin{tip}
+학기 시작처럼 중요한 작업을 마치셨을 때, 그리고 큰 폭으로 고치기 \textbf{전에} 한 번씩 받아 두세요.
+파일 이름 뒤에 \code{\_배치완료}, \code{\_수정전}처럼 붙여 두면 되돌리기 쉽습니다.
+\end{tip}
+
+\subsection{되살리기 · 다른 컴퓨터에서 이어 하기}
+
+\btn{불러오기}로 그 파일을 고르면 그대로 되살아납니다.
+다른 컴퓨터에서 이어서 작업하실 때도 이 방법을 쓰시면 됩니다.
+
+\subsection{처음부터 다시}
+
+\btn{초기화}는 전부 지우고 처음 상태로 돌립니다. 되돌릴 수 없으니 \textbf{내보내기를 먼저} 하세요.
+
+% =====================================================================
+\section{자주 묻는 질문}
+
+\newcommand{\qa}[2]{%
+  \par\medskip\noindent{\sffamily\bfseries\color{ttdark} Q. #1}\par
+  \noindent\hspace{1.1em}\begin{minipage}{\dimexpr\linewidth-1.1em\relax}#2\end{minipage}\par}
+
+\qa{인터넷이 끊겨도 쓸 수 있나요?}{
+  한 번 연 뒤에는 계산이 전부 컴퓨터 안에서 일어나므로 대체로 그대로 쓸 수 있습니다.
+  다만 새로고침하거나 새로 열려면 인터넷이 필요합니다.}
+
+\qa{여러 선생님이 같이 편집할 수 있나요?}{
+  아니요. 서버가 없어서 각자의 브라우저에만 저장됩니다.
+  같이 쓰시려면 \btn{내보내기}로 받은 파일을 주고받으세요.}
+
+\qa{입력한 내용이 밖으로 새어 나가나요?}{
+  나가지 않습니다. 서버로 아무것도 보내지 않습니다.
+  다만 \textbf{공용 컴퓨터}에서 쓰셨다면 브라우저에 남으니, 마치신 뒤 \btn{초기화}를 눌러 주세요.}
+
+\qa{방문형이라 빈 칸이 많이 남는데 괜찮나요?}{
+  괜찮습니다. ``빈 시간이 남는 체험반''은 노란색 알림 한 줄로만 알려 드리고 배치는 그대로 진행합니다.}
+
+\qa{자동 배치가 너무 오래 걸립니다.}{
+  대개 몇 초 안에 끝납니다. 오래 걸린다면 체험존이 모자란 경우가 많으니
+  \tab{프로그램 배정} 탭의 \textbf{체험존 사용률}을 확인해 보세요.}
+
+\qa{손으로 고친 시간표를 자동 배치가 유지해 주나요?}{
+  아니요. 자동 배치는 \textbf{처음부터 새로} 짭니다.
+  일부만 고정하고 나머지를 자동으로 채우는 기능은 아직 없습니다.
+  자동으로 크게 짠 다음 손으로 다듬는 순서로 쓰시는 것을 권합니다.}
+
+\qa{로테이션을 걸었는데 강사가 안 바뀝니다.}{
+  세 가지를 확인해 보세요. (1) 조에 강사가 2명 이상 들어 있는지,
+  (2) 회차의 \field{이동 칸 수}가 0이 아닌지(0은 기준안 그대로입니다),
+  (3) \tab{시간표} 탭 위에서 그 회차를 골랐는지.}
+
+\qa{휴대폰이나 태블릿에서도 되나요?}{
+  화면은 보입니다. 다만 끌어다 놓아 고치는 작업은 마우스가 있는 컴퓨터가 훨씬 편합니다.}
+
+% =====================================================================
+\appendix
+\section{부록 — 관리자용}
+
+\subsection{쓰이는 기술}
+
+\begin{itemize}
+  \item 서버·데이터베이스가 없습니다. 정적 웹페이지 하나로 돌아갑니다.
+  \item 저장은 브라우저 \code{localStorage} 한 곳뿐입니다.
+  \item 엑셀 읽기·쓰기를 외부 라이브러리 없이 직접 합니다.
+  \item 배치 계산은 별도 스레드(Web Worker)에서 돌아 화면이 멈추지 않습니다.
+\end{itemize}
+
+\subsection{소스와 배포}
+
+\begin{itemize}
+  \item 소스: \url{https://github.com/infgrp/timetable}
+  \item 배포: \code{main} 브랜치에 올리면 Vercel이 자동으로 배포합니다.
+\end{itemize}
+
+\subsection{개발자용 명령}
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\ttfamily\small}l X@{}}
+\toprule
+npm run dev & 개발 서버 \\
+npm run build & 배포용 빌드 \\
+npm run sample & 예시 데이터를 풀고 제약 위반을 직접 검증 \\
+npm run stress & 30개 반 규모 부하 테스트 \\
+npm run import:check & 엑셀·CSV 왕복, 충돌 검출, 로테이션 검증 \\
+npm run render:check & 화면이 실제로 그려지는지 검증 \\
+npm run manual & 이 설명서를 다시 만들어 \code{public/manual.pdf} 로 넣기 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\subsection{이 설명서 고치기}
+
+원본은 \code{docs/manual.tex}입니다. 고친 뒤 \code{npm run manual}을 돌리면
+\code{public/manual.pdf}가 새로 만들어지고, 이것을 커밋해 올리면 앱에서 바로 열립니다
+(XeLaTeX과 맑은 고딕 글꼴이 필요합니다).
+
+\vfill
+\begin{center}
+{\color{ttline}\rule{0.5\linewidth}{0.8pt}}\\[0.8em]
+{\small\color{ttgray} 잘 안 되는 부분이나 고쳤으면 하는 점이 있으면 알려 주세요.}
+\end{center}
+
+\end{document}
