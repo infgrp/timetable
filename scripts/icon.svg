@@ -1,0 +1,64 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="55%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#312e81"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#eef2ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#1e1b4b" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <!-- 은은한 장식 원 -->
+  <circle cx="70" cy="80" r="120" fill="#ffffff" opacity="0.07"/>
+  <circle cx="450" cy="440" r="150" fill="#ffffff" opacity="0.06"/>
+
+  <!-- 시간표 카드 (살짝 기울임) -->
+  <g transform="rotate(-5 256 250)" filter="url(#shadow)">
+    <rect x="96" y="92" width="320" height="330" rx="28" fill="url(#card)"/>
+    <!-- 헤더 바 -->
+    <rect x="96" y="92" width="320" height="64" rx="28" fill="#4f46e5"/>
+    <rect x="96" y="128" width="320" height="28" fill="#4f46e5"/>
+    <!-- 헤더 요일 점 -->
+    <circle cx="146" cy="124" r="9" fill="#c7d2fe"/>
+    <circle cx="186" cy="124" r="9" fill="#c7d2fe"/>
+    <circle cx="226" cy="124" r="9" fill="#c7d2fe"/>
+    <circle cx="266" cy="124" r="9" fill="#c7d2fe"/>
+    <circle cx="306" cy="124" r="9" fill="#c7d2fe"/>
+
+    <!-- 격자선 -->
+    <g stroke="#e0e7ff" stroke-width="3">
+      <line x1="176" y1="156" x2="176" y2="422"/>
+      <line x1="256" y1="156" x2="256" y2="422"/>
+      <line x1="336" y1="156" x2="336" y2="422"/>
+      <line x1="96"  y1="222" x2="416" y2="222"/>
+      <line x1="96"  y1="288" x2="416" y2="288"/>
+      <line x1="96"  y1="354" x2="416" y2="354"/>
+    </g>
+
+    <!-- 수업 블록 (과목별 색) -->
+    <rect x="108" y="166" width="58" height="46" rx="10" fill="#f59e0b"/>
+    <rect x="268" y="166" width="58" height="46" rx="10" fill="#10b981"/>
+    <rect x="188" y="232" width="58" height="46" rx="10" fill="#f43f5e"/>
+    <rect x="348" y="232" width="58" height="46" rx="10" fill="#0ea5e9"/>
+    <rect x="108" y="298" width="58" height="46" rx="10" fill="#8b5cf6"/>
+    <rect x="268" y="298" width="58" height="46" rx="10" fill="#f59e0b"/>
+    <rect x="188" y="364" width="58" height="46" rx="10" fill="#10b981"/>
+    <rect x="348" y="364" width="58" height="46" rx="10" fill="#f43f5e"/>
+  </g>
+
+  <!-- 시계 배지 -->
+  <g transform="translate(396 396)">
+    <circle r="72" fill="#ffffff"/>
+    <circle r="72" fill="none" stroke="#4f46e5" stroke-width="12"/>
+    <line x1="0" y1="0" x2="0" y2="-38" stroke="#312e81" stroke-width="11" stroke-linecap="round"/>
+    <line x1="0" y1="0" x2="27" y2="14" stroke="#0ea5e9" stroke-width="11" stroke-linecap="round"/>
+    <circle r="9" fill="#312e81"/>
+  </g>
+</svg>
