@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppData } from "../types";
-import { emptyTeacher, periodsOf, slotKey } from "../store";
+import { emptyTeacher, slotKey } from "../store";
+import { calendarPeriods, dayPeriods } from "../calendar";
 import { Button, Card, Empty, Field, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -21,7 +22,7 @@ export default function TeachersPanel({ data, set }: Props) {
     return () => window.removeEventListener("pointerup", stop);
   }, []);
 
-  const periods = periodsOf(data.slots);
+  const periods = calendarPeriods(data);
   const teacher = data.teachers.find((t) => t.id === selected) ?? null;
 
   const setUnavailable = (keys: string[]) =>
@@ -63,6 +64,8 @@ export default function TeachersPanel({ data, set }: Props) {
       ...d,
       teachers: d.teachers.filter((t) => t.id !== id),
       courses: d.courses.filter((c) => c.teacherId !== id),
+      timetable: d.timetable.map((a) => a.teacherId === id ? { ...a, teacherId: null } : a),
+      rotation: { ...d.rotation, groups: d.rotation.groups.map((g) => ({ ...g, teacherIds: g.teacherIds.filter((t) => t !== id) })) },
     }));
 
   return (
@@ -158,7 +161,7 @@ export default function TeachersPanel({ data, set }: Props) {
                     <th
                       key={day}
                       className="min-w-20 cursor-pointer border border-tt-200 bg-tt-100 px-3 py-1.5 text-sm font-bold text-tt-800 hover:bg-tt-200"
-                      onClick={() => toggleMany(periods.map((_, pi) => slotKey(di, pi)))}
+                      onClick={() => toggleMany(dayPeriods(data, di).map((_, pi) => slotKey(di, pi)))}
                       title="이 요일 전체 토글"
                     >
                       {day}
@@ -171,7 +174,7 @@ export default function TeachersPanel({ data, set }: Props) {
                   <tr key={p.id}>
                     <th
                       className="cursor-pointer border border-tt-200 bg-tt-50 px-2 py-1 text-left text-xs font-semibold text-tt-700 hover:bg-tt-100"
-                      onClick={() => toggleMany(data.days.map((_, di) => slotKey(di, pi)))}
+                      onClick={() => toggleMany(data.days.flatMap((_, di) => dayPeriods(data, di)[pi] ? [slotKey(di, pi)] : []))}
                       title="이 교시 전체 토글"
                     >
                       {p.label}
@@ -180,22 +183,25 @@ export default function TeachersPanel({ data, set }: Props) {
                     {data.days.map((day, di) => {
                       const key = slotKey(di, pi);
                       const off = teacher.unavailable.includes(key);
+                      const exists = Boolean(dayPeriods(data, di)[pi]);
                       return (
                         <td
                           key={day}
                           onPointerDown={(e) => {
+                            if (!exists) return;
                             e.preventDefault();
                             painting.current = !off;
                             applyPaint(key, !off);
                           }}
                           onPointerEnter={() => {
+                            if (!exists) return;
                             if (painting.current !== null) applyPaint(key, painting.current);
                           }}
                           className={`h-10 cursor-pointer border border-tt-200 text-center text-xs font-semibold transition ${
                             off ? "bg-red-500 text-white" : "bg-white text-tt-300 hover:bg-tt-50"
                           }`}
                         >
-                          {off ? "회피" : ""}
+                          {!exists ? "운영 없음" : off ? "회피" : ""}
                         </td>
                       );
                     })}

@@ -1,6 +1,6 @@
 import type { AppData, Assignment } from "../types";
 import { fits, knownSubjects } from "../assignments";
-import { periodsOf } from "../store";
+import { dayPeriods } from "../calendar";
 import { Button, Field, Select, TextInput } from "./ui";
 
 type Props = {
@@ -13,7 +13,7 @@ type Props = {
 
 /** 배치된 칸 하나를 고치는 폼. 고치는 즉시 반영된다(따로 저장 버튼 없음). */
 export default function AssignmentEditor({ data, value, onChange, onDelete, onClose }: Props) {
-  const periods = periodsOf(data.slots);
+  const periods = dayPeriods(data, value.day);
   const patch = (p: Partial<Assignment>) => onChange({ ...value, ...p });
   const canBlock = fits(data, value.day, value.period, 2);
 

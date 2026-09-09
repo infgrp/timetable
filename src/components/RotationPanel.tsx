@@ -5,8 +5,10 @@ import {
   cycleLength,
   formatTurnDate,
   newGroup,
-  newTurn,
-  rotateAssignments,
+  applyRotation,
+  previewRotation,
+  previewUndo,
+  undoRotation,
   rotationPlan,
 } from "../rotation";
 import { buildGrids } from "../assignments";
@@ -40,36 +42,25 @@ export default function RotationPanel({ data, set }: Props) {
   const cycle = cycleLength(groups);
   const ready = canRotate(data.rotation);
   const hasTimetable = data.timetable.length > 0;
+  const preview = previewRotation(data);
+  const undoPreview = previewUndo(data);
+  const unusedTeachers = data.teachers.filter((t) => !groups.some((g) => g.teacherIds.includes(t.id)));
 
   /** 실제로 한 칸 돌린다 — 시간표의 강사가 그 자리에서 바뀌고 기록이 남는다. */
   const rotateNow = () => {
-    if (!ready || !hasTimetable) return;
+    if (!ready || !hasTimetable || preview.errors.length) return;
     const label = note.trim() || "직접 돌림";
     if (!confirm(`지금 시간표의 담당 강사를 한 칸 밉니다.\n(${label})\n계속할까요?`)) return;
-    set((d) => ({
-      ...d,
-      timetable: rotateAssignments(d.timetable, d.rotation.groups, 1),
-      rotation: {
-        ...d.rotation,
-        turns: d.rotation.turns + 1,
-        log: [newTurn(d.rotation.turns + 1, label), ...d.rotation.log].slice(0, 60),
-      },
-    }));
+    try { const next = applyRotation(data, label); set(() => next); }
+    catch (e) { alert(e instanceof Error ? e.message : String(e)); }
     setNote("");
   };
 
   const undoLast = () => {
-    if (turns <= 0) return;
+    if (turns <= 0 || undoPreview.errors.length) return;
     if (!confirm("마지막으로 돌린 것을 되돌립니다. 계속할까요?")) return;
-    set((d) => ({
-      ...d,
-      timetable: rotateAssignments(d.timetable, d.rotation.groups, -1),
-      rotation: {
-        ...d.rotation,
-        turns: Math.max(0, d.rotation.turns - 1),
-        log: d.rotation.log.slice(1),
-      },
-    }));
+    try { const next = undoRotation(data); set(() => next); }
+    catch (e) { alert(e instanceof Error ? e.message : String(e)); }
   };
 
   /** 앞으로 N번치를 미리 뽑아 나눠 줄 때 */
@@ -79,8 +70,9 @@ export default function RotationPanel({ data, set }: Props) {
     const head = data.schoolName ? data.schoolName + " " : "";
     const sheets: XSheet[] = [];
     for (let step = 0; step < n; step++) {
-      const list = rotateAssignments(data.timetable, groups, step);
-      const grids = buildGrids(data, list);
+      const future = previewRotation(data, step);
+      if (future.errors.length) { alert(`${step}번 뒤 시간표에 충돌이 있습니다.\n${future.errors.join("\n")}`); return; }
+      const grids = buildGrids(data, future.timetable);
       for (const t of data.teachers) {
         const label = step === 0 ? "현재" : `${step}번 뒤`;
         sheets.push(
@@ -89,6 +81,7 @@ export default function RotationPanel({ data, set }: Props) {
             title: `${head}${t.name || "(이름없음)"} 강사 시간표 (${label})`,
             days: data.days,
             slots: data.slots,
+            daySlots: data.daySlots,
             grid: grids.byTeacher.get(t.id) ?? [],
           }),
         );
@@ -121,15 +114,15 @@ export default function RotationPanel({ data, set }: Props) {
             + 로테이션 조 추가
           </Button>
           <Button
-            disabled={data.teachers.length < 2}
+            disabled={unusedTeachers.length < 2}
             onClick={() =>
               setRotation((r) => ({
                 ...r,
-                groups: [...r.groups, newGroup("전체", data.teachers.map((t) => t.id))],
+                groups: [...r.groups, newGroup("미배정 강사", unusedTeachers.map((t) => t.id))],
               }))
             }
           >
-            강사 전체를 한 조로
+            미배정 강사를 한 조로
           </Button>
         </div>
 
@@ -140,7 +133,7 @@ export default function RotationPanel({ data, set }: Props) {
         ) : (
           <div className="mt-4 grid gap-4 lg:grid-cols-2">
             {groups.map((g) => {
-              const remaining = data.teachers.filter((t) => !g.teacherIds.includes(t.id));
+              const remaining = unusedTeachers;
               return (
                 <div key={g.id} className="rounded-lg border border-tt-200 p-3">
                   <div className="mb-2 flex items-center gap-2">
@@ -240,7 +233,7 @@ export default function RotationPanel({ data, set }: Props) {
           </div>
           <Button
             variant="primary"
-            disabled={!ready || !hasTimetable}
+            disabled={!ready || !hasTimetable || preview.errors.length > 0}
             title={
               !ready
                 ? "2명 이상인 로테이션 조가 필요합니다"
@@ -252,7 +245,7 @@ export default function RotationPanel({ data, set }: Props) {
           >
             다음으로 돌리기
           </Button>
-          <Button variant="danger" disabled={turns <= 0} onClick={undoLast}>
+          <Button variant="danger" disabled={turns <= 0 || undoPreview.errors.length > 0} onClick={undoLast}>
             한 칸 되돌리기
           </Button>
           <Button
@@ -263,6 +256,16 @@ export default function RotationPanel({ data, set }: Props) {
             앞으로 {cycle || "?"}번치 미리 받기
           </Button>
         </div>
+
+        {preview.errors.length > 0 && (
+          <div role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+            <p className="font-bold">로테이션을 적용할 수 없습니다</p>
+            <ul>{preview.errors.map((error, i) => <li key={i}>{error}</li>)}</ul>
+          </div>
+        )}
+        {turns > 0 && undoPreview.errors.length > 0 && (
+          <p className="mt-3 text-sm text-amber-800">되돌리기: {undoPreview.errors.join(" ")}</p>
+        )}
 
         <p className="mt-3 text-sm text-tt-600">
           지금까지 <b className="text-tt-800">{turns}번</b> 돌렸습니다.

@@ -128,6 +128,8 @@ export type RotationTurn = {
   turns: number;
   /** "10월부터" 같은 메모 */
   note: string;
+  /** 실제 변경된 담당자. 규칙을 수정해도 이 기록으로 되돌린다. */
+  changes?: { assignmentId: string; before: string | null; after: string | null }[];
 };
 
 /**
@@ -146,6 +148,8 @@ export type AppData = {
   schoolName: string;
   days: string[];
   slots: DaySlot[];
+  /** 요일별 하루 구성. 생략한 요일은 공통 slots를 사용한다. */
+  daySlots?: Record<string, DaySlot[]>;
   /** 요일별 고정 활동 (Orientation·Closing 등) */
   fixedActivities: FixedActivity[];
   /** 운영 구간 (월·화 / 수·목·금). 비어 있으면 모든 반이 모든 요일에 온다. */
@@ -178,6 +182,10 @@ export type SolveRequest = {
   periodCount: number;
   /** blockable[p] === true 이면 p 교시와 p+1 교시가 붙어 있다(사이에 점심·쉬는시간 없음). */
   blockable: boolean[];
+  blockableByDay?: boolean[][];
+  /** 다른 구간의 확정 시간표가 이미 사용하는 칸. */
+  reservedTeacherCells?: boolean[][];
+  reservedRoomCells?: boolean[][];
   lectures: Lecture[];
   teacherIds: string[];
   classIds: string[];

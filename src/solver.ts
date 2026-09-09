@@ -107,7 +107,6 @@ export function solve(
 
   /** classStarts[classIdx][len-1] */
   const classStarts: Int32Array[][] = [];
-  const classValid = [new Uint8Array(C * S), new Uint8Array(C * S)];
   for (let ci = 0; ci < C; ci++) {
     const perLen: Int32Array[] = [];
     for (const len of [1, 2]) {
@@ -115,7 +114,7 @@ export function solve(
       for (let d = 0; d < D; d++) {
         if (!dayAllowed(ci, d)) continue;
         for (let p = 0; p + len <= P; p++) {
-          if (len === 2 && !req.blockable[p]) continue;
+          if (len === 2 && !(req.blockableByDay?.[d]?.[p] ?? req.blockable[p])) continue;
           let free = true;
           for (let k = 0; k < len; k++)
             if (blockedCell[d * P + p + k]) {
@@ -127,12 +126,19 @@ export function solve(
         }
       }
       perLen.push(new Int32Array(list));
-      for (const s of list) classValid[len - 1][ci * S + s] = 1;
     }
     classStarts.push(perLen);
   }
 
-  const startsFor = (u: number): Int32Array => classStarts[unitClass[u]][unitLen[u] - 1];
+  const unitStarts = Array.from({ length: U }, (_, u) =>
+    classStarts[unitClass[u]][unitLen[u] - 1].filter((s) => {
+      for (let k = 0; k < unitLen[u]; k++) {
+        if (req.reservedTeacherCells?.[unitTeacher[u]]?.[s + k]) return false;
+        if (unitRoom[u] >= 0 && req.reservedRoomCells?.[unitRoom[u]]?.[s + k]) return false;
+      }
+      return true;
+    }));
+  const startsFor = (u: number): Int32Array => unitStarts[u];
 
   // ── 상태 ──
   const cellOwner = new Int32Array(C * S).fill(-1);
@@ -213,7 +219,7 @@ export function solve(
   const placeBest = (v: number, prefer: number): number => {
     const len = unitLen[v];
     const c = unitClass[v];
-    const list = classStarts[c][len - 1];
+    const list = startsFor(v);
     let bestS = -1;
     let bestC = Number.MAX_SAFE_INTEGER;
     const tryAt = (s: number) => {
@@ -226,7 +232,7 @@ export function solve(
         bestS = s;
       }
     };
-    if (prefer >= 0 && classValid[len - 1][c * S + prefer]) tryAt(prefer);
+    if (prefer >= 0 && list.includes(prefer)) tryAt(prefer);
     const n = list.length;
     if (n > 0) {
       const off = (rnd() * n) | 0;
@@ -255,7 +261,7 @@ export function solve(
       for (const u of list) {
         const len = unitLen[u];
         const li = unitLec[u];
-        const cand = classStarts[c][len - 1];
+        const cand = startsFor(u);
         let chosen = -1;
         let fallback = -1;
         const off = (rnd() * cand.length) | 0;
@@ -514,9 +520,9 @@ export function solve(
         for (let k = 0; k < len && hit < 0; k++) {
           const q = s + k;
           if (blockedFlat[t * S + q]) hit = 0;
-          else if (teacherUse[t * S + q] > 0) hit = 1;
+          else if (teacherUse[t * S + q] > 0 || req.reservedTeacherCells?.[t]?.[q]) hit = 1;
           else if (cellOwner[c * S + q] >= 0) hit = 2;
-          else if (r >= 0 && roomUse[r * S + q] > 0) hit = 3;
+          else if (r >= 0 && (roomUse[r * S + q] > 0 || req.reservedRoomCells?.[r]?.[q])) hit = 3;
         }
         if (hit >= 0) entry.counts[hit]++;
       }

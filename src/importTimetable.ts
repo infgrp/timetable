@@ -10,7 +10,8 @@
  * 요일·교시는 자리(index)가 곧 뜻이라 함부로 늘리지 않고, 모르는 값이면 건너뛰고 알린다.
  */
 import type { AppData, Assignment, Klass, Room, Teacher } from "./types";
-import { emptyTeacher, fixedCellSet, periodsOf, slotKey, uid } from "./store";
+import { emptyTeacher, fixedCellSet, slotKey, uid } from "./store";
+import { dayPeriods } from "./calendar";
 import { newAssignment, sortAssignments } from "./assignments";
 import { readXlsx } from "./xlsxRead";
 import type { Merge, ReadSheet } from "./xlsxRead";
@@ -110,6 +111,8 @@ type Raw = {
   block: boolean;
   /** 체험반 시간표에 강사를 적지 않는 수업 */
   hideTeacher: boolean;
+  /** 요일별 출력은 표준 교시 번호 축을 사용한다. 사용자 교시 이름과 구별한다. */
+  periodNumber?: number;
   where: string;
 };
 
@@ -236,21 +239,25 @@ function parseGridSheet(
     if (/·\s*\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}/.test(row[1] ?? "") && dayCols.length > 1) continue;
 
     const label = (row[0] ?? "").split("\n")[0].trim();
+    if (label === "휴식") continue;
 
     for (const { col, day } of dayCols) {
       const text = (row[col] ?? "").trim();
       if (!text) continue;
+      if (/^\d{1,2}:\d{2}~\d{1,2}:\d{2}$/.test(text)) continue;
       const [top, bottom = ""] = text.split("\n");
+      const hasDayTime = /^\d{1,2}:\d{2}~\d{1,2}:\d{2}$/.test(text.split("\n")[2] ?? "");
       const { teacher, room } = splitBottom(bottom, knownRoomNames, knownTeacherNames);
       const merge = mergeAt(sheet.merges, r, col);
       out.push({
         className,
         day,
         period: label,
+        periodNumber: hasDayTime ? Number.parseInt(label, 10) : undefined,
         subject: norm(top),
         teacher,
         room,
-        span: merge && merge.r2 - merge.r1 === 1 ? 2 : 1,
+        span: merge && sheet.rows.slice(merge.r1, merge.r2 + 1).filter((row) => row[0] !== "휴식").length === 2 ? 2 : 1,
         block: false,
         // 격자에는 강사 숨김 여부가 남지 않는다. 아래줄이 비어 있으면 그냥 강사 미지정으로 들어온다.
         hideTeacher: false,
@@ -276,7 +283,6 @@ export type ImportPreview = {
 export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview {
   const warnings: string[] = [];
   const sources: ImportPreview["sources"] = [];
-  const periods = periodsOf(data.slots);
   const fixed = fixedCellSet(data);
 
   const knownRoomNames = new Set(data.rooms.map((r) => key(r.name)));
@@ -353,9 +359,10 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
     return null;
   };
 
-  const periodByLabel = new Map(periods.map((p, i) => [key(p.label), i]));
-  const periodByStart = new Map(periods.map((p, i) => [p.start, i]));
-  const resolvePeriod = (text: string): number | null => {
+  const resolvePeriod = (text: string, day: number): number | null => {
+    const periods = dayPeriods(data, day);
+    const periodByLabel = new Map(periods.map((p, i) => [key(p.label), i]));
+    const periodByStart = new Map(periods.map((p, i) => [p.start, i]));
     const k = key(text);
     if (periodByLabel.has(k)) return periodByLabel.get(k)!;
     const time = /^(\d{1,2}:\d{2})/.exec(norm(text));
@@ -388,7 +395,9 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
       skipped += 1;
       continue;
     }
-    const period = resolvePeriod(raw.period);
+    const period = raw.periodNumber !== undefined
+      ? (raw.periodNumber > 0 && raw.periodNumber <= dayPeriods(data, day).length ? raw.periodNumber - 1 : null)
+      : resolvePeriod(raw.period, day);
     if (period === null) {
       missedPeriods.add(raw.period || "(빈 칸)");
       skipped += 1;
@@ -513,7 +522,7 @@ const TEMPLATE_HEADER = ["체험반", "요일", "교시", "프로그램", "강�
 
 /** 지금 입력된 값으로 예시 두 줄을 채운 빈 서식 */
 export function buildTemplate(data: AppData): Blob {
-  const periods = periodsOf(data.slots);
+  const periods = dayPeriods(data, 0);
   const cls = data.classes[0]?.name || "A반";
   const day = data.days[0] || "월";
   const p1 = periods[0]?.label || "1교시";
@@ -566,12 +575,12 @@ export function buildTemplate(data: AppData): Blob {
 
 /** 지금 구성된 시간표를 양식과 같은 모양으로 펼친다 (내보냈다가 고쳐서 다시 올릴 수 있게). */
 export function toTemplateRows(data: AppData, list: Assignment[]): string[][] {
-  const periods = periodsOf(data.slots);
   const className = new Map(data.classes.map((c) => [c.id, c.name]));
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name]));
   const roomName = new Map(data.rooms.map((r) => [r.id, r.name]));
   const rows: string[][] = [TEMPLATE_HEADER];
   for (const a of sortAssignments(list)) {
+    const periods = dayPeriods(data, a.day);
     for (let k = 0; k < a.length; k++) {
       rows.push([
         className.get(a.classId) ?? "",
