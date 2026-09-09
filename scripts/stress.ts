@@ -1,5 +1,5 @@
 import { solve } from "../src/solver";
-import { blockableFlags, DEFAULT_GEN, generateSlots, periodsOf, uid } from "../src/store";
+import { buildSolveRequest, DEFAULT_GEN, generateSlots, periodsOf, uid } from "../src/store";
 import type { AppData, SolveRequest } from "../src/types";
 
 /** 30학급 규모의 인문계 고교를 흉내 낸 부하 테스트 */
@@ -75,51 +75,28 @@ function bigSchool(): AppData {
   });
 
   return {
-    version: 2,
+    version: 3,
     schoolName: "부하테스트고",
     days,
     slots,
+    fixedActivities: [],
+    segments: [],
     classes,
     rooms,
     teachers,
     courses,
     timetable: [],
-    rotation: { groups: [], rounds: [] },
+    rotation: { groups: [], turns: 0, log: [] },
   };
 }
 
 const data = bigSchool();
 const P = periodsOf(data.slots).length;
-const lectures = data.courses.flatMap((c) =>
-  c.classIds.map((classId) => ({
-    courseId: c.id,
-    teacherId: c.teacherId,
-    classId,
-    subject: c.subject,
-    roomId: c.roomId,
-    hours: c.hours,
-    blocks: c.blocks,
-  })),
-);
-const req: SolveRequest = {
-  dayCount: data.days.length,
-  periodCount: P,
-  blockable: blockableFlags(data.slots),
-  lectures,
-  teacherIds: data.teachers.map((t) => t.id),
-  classIds: data.classes.map((c) => c.id),
-  roomIds: data.rooms.map((r) => r.id),
-  teacherBlocked: data.teachers.map((t) => {
-    const arr = new Array<boolean>(data.days.length * P).fill(false);
-    for (const key of t.unavailable) {
-      const [d, p] = key.split(":").map(Number);
-      arr[d * P + p] = true;
-    }
-    return arr;
-  }),
+const req: SolveRequest = buildSolveRequest(data, {
   timeLimitMs: Number(process.argv[2] ?? 30000),
   seed: 7,
-};
+});
+const lectures = req.lectures;
 
 const hoursPerClass = data.courses.reduce((a, c) => a + c.hours, 0) / 1; // 모든 학급이 같은 구성
 const perClass = new Map<string, number>();

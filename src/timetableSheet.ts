@@ -59,7 +59,8 @@ export function toSheet(opts: {
         row[di + 1] = { text: "", style: "empty" };
         return;
       }
-      const style = `subject${(cell.hue % 8) as 0}` as CellStyle;
+      // 고정 활동은 점심시간 띠와 같은 서식으로 — 수업이 아니라는 것이 한눈에 보이게.
+      const style: CellStyle = cell.fixed ? "lunch" : (`subject${(cell.hue % 8) as 0}` as CellStyle);
       row[di + 1] = {
         text: cell.bottom ? `${cell.top}\n${cell.bottom}` : cell.top,
         style,

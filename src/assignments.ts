@@ -5,7 +5,7 @@
  * 화면 격자·엑셀 내보내기·로테이션은 모두 이 목록만 읽는다.
  */
 import type { AppData, Assignment, Lecture, SolveResult } from "./types";
-import { blockableFlags, periodsOf, uid } from "./store";
+import { allowedDaysOf, blockableFlags, fixedCellNames, periodsOf, slotKey, uid } from "./store";
 import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
 
@@ -38,6 +38,7 @@ export function fromSolveResult(result: SolveResult, lectures: Lecture[]): Assig
         day: unit.day,
         period: unit.period,
         length: unit.length === 2 ? 2 : 1,
+        hideTeacher: lec.hideTeacher,
       }),
     );
   }
@@ -60,6 +61,26 @@ export function fits(data: AppData, day: number, period: number, length: 1 | 2):
   if (period < 0 || period + length > P) return false;
   if (length === 2 && !blockableFlags(data.slots)[period]) return false;
   return true;
+}
+
+/**
+ * 고정 활동이 막고 있는 자리면 그 이름을 돌려준다.
+ * 자리 자체는 성립하지만 Orientation·Closing 이 이미 쓰고 있는 칸이다.
+ */
+export function blockedBy(data: AppData, day: number, period: number, length: 1 | 2): string | null {
+  const fixed = fixedCellNames(data);
+  for (let k = 0; k < length; k++) {
+    const name = fixed.get(slotKey(day, period + k));
+    if (name) return name;
+  }
+  return null;
+}
+
+/** 이 체험반이 그 요일에 오는지 (운영 구간 밖이면 false) */
+export function dayAllowedFor(data: AppData, classId: string, day: number): boolean {
+  const klass = data.classes.find((c) => c.id === classId);
+  if (!klass) return true;
+  return allowedDaysOf(data, klass).includes(day);
 }
 
 export function setPosition(list: Assignment[], id: string, day: number, period: number): Assignment[] {
@@ -89,7 +110,7 @@ export function removeAssignment(list: Assignment[], id: string): Assignment[] {
 /** ── 충돌 검사 ───────────────────────────────────────── */
 
 export type Conflict = {
-  kind: "class" | "teacher" | "room" | "avoid" | "range";
+  kind: "class" | "teacher" | "room" | "avoid" | "range" | "fixed" | "segment";
   text: string;
   /** 이 충돌에 얽힌 배치 id */
   ids: string[];
@@ -101,6 +122,8 @@ const KIND_LABEL: Record<Conflict["kind"], string> = {
   room: "체험존 겹침",
   avoid: "강사 회피 시간",
   range: "자리 오류",
+  fixed: "고정 활동 자리",
+  segment: "운영 구간 밖",
 };
 
 export function conflictLabel(kind: Conflict["kind"]): string {
@@ -116,6 +139,8 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   const periods = periodsOf(data.slots);
   const P = periods.length;
   const flags = blockableFlags(data.slots);
+  const fixed = fixedCellNames(data);
+  const classById = new Map(data.classes.map((c) => [c.id, c]));
   const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
   const roomName = new Map(data.rooms.map((r) => [r.id, r.name || "(이름없음)"]));
@@ -137,6 +162,32 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
       });
       continue;
     }
+
+    const onFixed = periodsCovered(a).find((p) => fixed.has(slotKey(a.day, p)));
+    if (onFixed !== undefined) {
+      out.push({
+        kind: "fixed",
+        text: `${className.get(a.classId) ?? "?"} ${a.subject || "(프로그램 미입력)"} — ${at(
+          a.day,
+          onFixed,
+        )}는 ${fixed.get(slotKey(a.day, onFixed))} 시간입니다.`,
+        ids: [a.id],
+      });
+      continue;
+    }
+
+    const klass = classById.get(a.classId);
+    if (klass && !allowedDaysOf(data, klass).includes(a.day)) {
+      out.push({
+        kind: "segment",
+        text: `${klass.name || "(이름없음)"} — ${data.days[a.day] ?? "?"}요일은 이 반이 오는 날이 아닙니다: ${
+          a.subject || "(프로그램 미입력)"
+        }`,
+        ids: [a.id],
+      });
+      continue;
+    }
+
     usable.push(a);
   }
 
@@ -191,7 +242,7 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
     if (!a.teacherId) continue;
     const blocked = avoid.get(a.teacherId);
     if (!blocked) continue;
-    const hit = periodsCovered(a).find((p) => blocked.has(`${a.day}:${p}`));
+    const hit = periodsCovered(a).find((p) => blocked.has(slotKey(a.day, p)));
     if (hit === undefined) continue;
     out.push({
       kind: "avoid",
@@ -227,6 +278,16 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
   for (const t of data.teachers) byTeacher.set(t.id, blank());
   for (const r of data.rooms) byRoom.set(r.id, blank());
 
+  // 고정 활동을 먼저 깐다 — 체험반도 강사도 그 시간에는 여기에 묶여 있다.
+  // (특정 체험존을 쓰는 것이 아니므로 존 시간표에는 넣지 않는다.)
+  for (const [key, name] of fixedCellNames(data)) {
+    const [d, p] = key.split(":").map(Number);
+    if (!(d >= 0 && d < data.days.length && p >= 0 && p < periods.length)) continue;
+    const cell: Cell = { top: name, span: 1, hue: 0, fixed: true };
+    for (const grid of byClass.values()) grid[p][d] = cell;
+    for (const grid of byTeacher.values()) grid[p][d] = cell;
+  }
+
   const put = (grid: Grid | undefined, a: Assignment, cell: Cell) => {
     if (!grid) return;
     if (!grid[a.period] || a.period + a.length > periods.length) return;
@@ -242,6 +303,8 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
     if (a.day < 0 || a.day >= data.days.length) continue;
     const room = a.roomId ? roomName.get(a.roomId) : undefined;
     const teacher = a.teacherId ? teacherName.get(a.teacherId) : undefined;
+    // 매주 담당이 바뀌는 수업은 체험반·체험존 표에 강사를 적지 않는다.
+    const shownTeacher = a.hideTeacher ? undefined : teacher;
     const hue = hueOf(a.subject);
     const bad = badIds?.has(a.id) ?? false;
     const base = { span: a.length, hue, id: a.id, bad };
@@ -249,7 +312,7 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
     put(byClass.get(a.classId), a, {
       ...base,
       top: a.subject || "(프로그램 미입력)",
-      bottom: [teacher, room].filter(Boolean).join(" · "),
+      bottom: [shownTeacher, room].filter(Boolean).join(" · "),
     });
     if (a.teacherId)
       put(byTeacher.get(a.teacherId), a, {
@@ -261,11 +324,28 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
       put(byRoom.get(a.roomId), a, {
         ...base,
         top: className.get(a.classId) ?? "(삭제된 체험반)",
-        bottom: [a.subject, teacher].filter(Boolean).join(" · "),
+        bottom: [a.subject, shownTeacher].filter(Boolean).join(" · "),
       });
   }
 
   return { byClass, byTeacher, byRoom };
+}
+
+/** 격자에서 고른 요일만 남긴다 (운영 구간별로 볼 때). */
+export function sliceGrid(grid: Grid, dayIndices: number[]): Grid {
+  return grid.map((row) => dayIndices.map((d) => row[d] ?? null));
+}
+
+/** 실제 수업이 든 칸 수 (고정 활동은 세지 않는다) */
+export function usedCells(grid: Grid): number {
+  let n = 0;
+  for (const row of grid) {
+    for (const cell of row) {
+      if (cell === "cont") n += 1;
+      else if (cell && !cell.fixed) n += 1;
+    }
+  }
+  return n;
 }
 
 /** 프로그램명 자동완성 후보 — 배정 탭과 이미 짜인 시간표에서 모은다. */

@@ -5,7 +5,7 @@
  *   3) 로테이션이 규칙대로 강사를 미는지
  */
 import type { AppData, Assignment } from "../src/types";
-import { DEFAULT_GEN, generateSlots, uid } from "../src/store";
+import { allowedDaysOf, classCapacity, DEFAULT_GEN, generateSlots, uid, weekCapacity } from "../src/store";
 import { buildGrids, conflictsOf, newAssignment } from "../src/assignments";
 import { applyImport, buildTemplate, importSheets, parseCsv, toTemplateRows } from "../src/importTimetable";
 import { readXlsx } from "../src/xlsxRead";
@@ -31,10 +31,12 @@ const teachers = ["Emma Clark", "김지영", "한도윤"].map((name) => ({
 }));
 
 const data: AppData = {
-  version: 2,
+  version: 3,
   schoolName: "○○영어체험센터",
   days: ["월", "화", "수", "목", "금"],
   slots: generateSlots(DEFAULT_GEN),
+  fixedActivities: [],
+  segments: [],
   classes,
   rooms,
   teachers,
@@ -42,7 +44,8 @@ const data: AppData = {
   timetable: [],
   rotation: {
     groups: [{ id: uid("g"), name: "존 담당", teacherIds: teachers.map((t) => t.id) }],
-    rounds: [],
+    turns: 0,
+    log: [],
   },
 };
 
@@ -165,10 +168,14 @@ if (fingerprint(fromXlsx.assignments) !== want) {
 
 const templateSheets = await readXlsx(await buildTemplate(data).arrayBuffer());
 const fromTemplate = importSheets(data, templateSheets);
-check("양식 파일이 그대로 읽힌다", fromTemplate.assignments.length === 2, `${fromTemplate.assignments.length}칸`);
+check("양식 파일이 그대로 읽힌다", fromTemplate.assignments.length === 3, `${fromTemplate.assignments.length}칸`);
 check(
   "양식의 '블록' 두 줄이 연속 2교시로 되붙는다",
   fromTemplate.assignments.some((a) => a.length === 2),
+);
+check(
+  "양식의 '숨김' 표시를 읽는다",
+  fromTemplate.assignments.some((a) => a.hideTeacher === true),
 );
 
 /** ── 4) 겹침을 잡아내는지 ────────────────────────────── */
@@ -240,6 +247,148 @@ check(
 check(
   "한 바퀴 돌면 제자리",
   fingerprint(rotateAssignments(timetable, data.rotation.groups, teachers.length)) === want,
+);
+
+/** ── 7) 고정 활동 (Orientation·Closing) ──────────────── */
+
+const fixedData: AppData = {
+  ...data,
+  fixedActivities: [
+    { id: uid("f"), name: "Orientation", cells: ["0:0", "2:0"] },
+    { id: uid("f"), name: "Closing", cells: ["1:5", "4:5"] },
+  ],
+};
+
+check(
+  "고정 활동 칸에 놓인 수업을 잡는다",
+  conflictsOf(fixedData, timetable).some((c) => c.kind === "fixed"),
+);
+check(
+  "고정 활동은 주당 칸 수에서 빠진다",
+  weekCapacity(fixedData) === weekCapacity(data) - 4,
+  `${weekCapacity(fixedData)} vs ${weekCapacity(data)}`,
+);
+
+const fixedGrid = buildGrids(fixedData, []).byClass.get(classes[0].id) ?? [];
+const oriCell = fixedGrid[0]?.[0];
+check(
+  "체험반 격자에 고정 활동이 그려진다",
+  Boolean(oriCell && oriCell !== "cont" && oriCell.fixed && oriCell.top === "Orientation"),
+);
+const teacherFixedGrid = buildGrids(fixedData, []).byTeacher.get(teachers[0].id) ?? [];
+const teacherOri = teacherFixedGrid[0]?.[0];
+check(
+  "강사 격자에도 고정 활동이 그려진다",
+  Boolean(teacherOri && teacherOri !== "cont" && teacherOri.fixed),
+);
+
+// 고정 활동이 든 격자를 내보냈다가 되읽어도 Orientation 이 수업으로 들어오면 안 된다.
+const fixedSheets = await readXlsx(
+  await buildXlsx([
+    toSheet({
+      sheetName: classes[0].name,
+      title: "고정 활동 왕복",
+      days: fixedData.days,
+      slots: fixedData.slots,
+      grid: fixedGrid,
+    }),
+  ]).arrayBuffer(),
+);
+const backFromFixed = importSheets(fixedData, fixedSheets);
+check(
+  "격자를 되읽어도 고정 활동은 수업이 되지 않는다",
+  backFromFixed.assignments.length === 0,
+  `${backFromFixed.assignments.length}칸`,
+);
+
+/** ── 8) 운영 구간 (월·화 / 수·목·금) ─────────────────── */
+
+const segEarly = { id: uid("sg"), name: "월·화", days: [0, 1] };
+const segLate = { id: uid("sg"), name: "수·목·금", days: [2, 3, 4] };
+const segData: AppData = {
+  ...data,
+  segments: [segEarly, segLate],
+  classes: [
+    { ...classes[0], segmentId: segEarly.id },
+    { ...classes[1], segmentId: segLate.id },
+  ],
+};
+
+check(
+  "구간이 오는 요일을 정한다",
+  allowedDaysOf(segData, segData.classes[0]).join(",") === "0,1" &&
+    allowedDaysOf(segData, segData.classes[1]).join(",") === "2,3,4",
+);
+check(
+  "구간에 따라 쓸 수 있는 칸 수가 달라진다",
+  classCapacity(segData, segData.classes[0]) === 12 && classCapacity(segData, segData.classes[1]) === 18,
+  `${classCapacity(segData, segData.classes[0])} / ${classCapacity(segData, segData.classes[1])}`,
+);
+
+// A반은 월·화만 오는데 목요일에 놓으면 잡아야 한다.
+const outOfSegment = newAssignment({
+  classId: classes[0].id,
+  subject: "구간 밖 수업",
+  day: 3,
+  period: 0,
+  length: 1,
+});
+check(
+  "구간 밖 요일에 놓인 수업을 잡는다",
+  conflictsOf(segData, [outOfSegment]).some((c) => c.kind === "segment"),
+);
+
+/** ── 9) 강사 숨김 (매주 담당이 바뀌는 수업) ──────────── */
+
+const hidden = newAssignment({
+  classId: classes[1].id,
+  teacherId: teachers[2].id,
+  roomId: rooms[1].id,
+  subject: "Adventure",
+  day: 4,
+  period: 2,
+  length: 1,
+  hideTeacher: true,
+});
+const hiddenGrids = buildGrids(data, [hidden]);
+const hiddenClassCell = hiddenGrids.byClass.get(classes[1].id)?.[2]?.[4];
+const hiddenTeacherCell = hiddenGrids.byTeacher.get(teachers[2].id)?.[2]?.[4];
+const classBottom =
+  hiddenClassCell && hiddenClassCell !== "cont" ? (hiddenClassCell.bottom ?? "") : "";
+check("체험반 시간표에는 강사가 나오지 않는다", !classBottom.includes("한도윤"), classBottom || "(빈칸)");
+check("그래도 체험존은 그대로 적힌다", classBottom.includes("레스토랑존"));
+check(
+  "강사 개인 시간표에는 그 수업이 들어간다",
+  Boolean(
+    hiddenTeacherCell &&
+      hiddenTeacherCell !== "cont" &&
+      (hiddenTeacherCell.bottom ?? "").includes("Adventure"),
+  ),
+);
+
+const hiddenCsv = toCsv(toTemplateRows(data, [hidden]));
+const hiddenBack = importSheets(data, [{ name: "시간표", rows: parseCsv(hiddenCsv), merges: [] }]);
+check(
+  "목록형 왕복에서 강사 숨김이 유지된다",
+  hiddenBack.assignments.length === 1 &&
+    hiddenBack.assignments[0].hideTeacher === true &&
+    hiddenBack.assignments[0].teacherId === teachers[2].id,
+);
+
+/** ── 10) 로테이션을 실제로 돌리기 ────────────────────── */
+
+let live = timetable;
+let turns = 0;
+for (let i = 0; i < teachers.length; i++) {
+  live = rotateAssignments(live, data.rotation.groups, 1);
+  turns += 1;
+}
+check("한 바퀴만큼 돌리면 처음으로 돌아온다", fingerprint(live) === want, `${turns}번`);
+
+live = rotateAssignments(timetable, data.rotation.groups, 1);
+check(
+  "한 칸 되돌리면 원래대로",
+  fingerprint(rotateAssignments(live, data.rotation.groups, -1)) === want,
 );
 
 console.log(failed === 0 ? "\n전부 통과" : `\n${failed}건 실패`);

@@ -120,7 +120,24 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
             <option value={2}>연속 2교시</option>
           </Select>
         </Field>
+
+        <Field label="강사 표기" hint="매주 담당이 바뀌는 수업이면 숨깁니다">
+          <label className="flex cursor-pointer items-center gap-2 pt-1.5 text-sm text-tt-700">
+            <input
+              type="checkbox"
+              checked={Boolean(value.hideTeacher)}
+              onChange={(e) => patch({ hideTeacher: e.target.checked || undefined })}
+            />
+            체험반 시간표에서 강사 숨기기
+          </label>
+        </Field>
       </div>
+
+      {value.hideTeacher && (
+        <p className="mt-3 rounded-lg border border-tt-200 bg-white p-2.5 text-xs text-tt-600">
+          체험반·체험존 시간표에는 강사 이름이 나오지 않고, 위에서 고른 강사의 개인 시간표에는 그대로 들어갑니다.
+        </p>
+      )}
     </div>
   );
 }

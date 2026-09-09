@@ -10,7 +10,7 @@
  * 요일·교시는 자리(index)가 곧 뜻이라 함부로 늘리지 않고, 모르는 값이면 건너뛰고 알린다.
  */
 import type { AppData, Assignment, Klass, Room, Teacher } from "./types";
-import { emptyTeacher, periodsOf, uid } from "./store";
+import { emptyTeacher, fixedCellSet, periodsOf, slotKey, uid } from "./store";
 import { newAssignment, sortAssignments } from "./assignments";
 import { readXlsx } from "./xlsxRead";
 import type { Merge, ReadSheet } from "./xlsxRead";
@@ -70,6 +70,7 @@ const ALIAS = {
   teacher: ["강사", "교사", "선생님", "담당", "담당강사", "teacher"],
   room: ["체험존", "존", "교실", "장소", "실", "room", "zone"],
   block: ["연속", "블록", "block"],
+  hide: ["강사표기", "강사표시", "강사숨김", "표기", "hideteacher"],
 } as const;
 
 type FieldName = keyof typeof ALIAS;
@@ -107,6 +108,8 @@ type Raw = {
   span: 1 | 2;
   /** 길이를 모르고 "연속" 표시만 있는 경우(목록형) — 붙어 있는 짝을 찾아 되붙인다. */
   block: boolean;
+  /** 체험반 시간표에 강사를 적지 않는 수업 */
+  hideTeacher: boolean;
   where: string;
 };
 
@@ -135,6 +138,7 @@ function parseListSheet(sheet: ReadSheet): Raw[] | null {
     teacher: columnOf(header, "teacher"),
     room: columnOf(header, "room"),
     block: columnOf(header, "block"),
+    hide: columnOf(header, "hide"),
   };
   const pick = (row: string[], c: number) => (c >= 0 ? (row[c] ?? "") : "");
 
@@ -143,6 +147,7 @@ function parseListSheet(sheet: ReadSheet): Raw[] | null {
     const row = sheet.rows[r];
     if (isBlank(row)) continue;
     const blockText = key(pick(row, col.block));
+    const hideText = key(pick(row, col.hide));
     out.push({
       className: norm(pick(row, col.klass)),
       day: norm(pick(row, col.day)),
@@ -152,6 +157,8 @@ function parseListSheet(sheet: ReadSheet): Raw[] | null {
       room: norm(pick(row, col.room)),
       span: 1,
       block: blockText === "블록" || blockText === "o" || blockText === "y" || blockText === "true",
+      hideTeacher:
+        hideText === "숨김" || hideText === "비공개" || hideText === "hidden" || hideText === "hide",
       where: `[${sheet.name}] ${r + 1}행`,
     });
   }
@@ -245,6 +252,8 @@ function parseGridSheet(
         room,
         span: merge && merge.r2 - merge.r1 === 1 ? 2 : 1,
         block: false,
+        // 격자에는 강사 숨김 여부가 남지 않는다. 아래줄이 비어 있으면 그냥 강사 미지정으로 들어온다.
+        hideTeacher: false,
         where: `[${sheet.name}] ${r + 1}행 ${day}`,
       });
     }
@@ -268,6 +277,7 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
   const warnings: string[] = [];
   const sources: ImportPreview["sources"] = [];
   const periods = periodsOf(data.slots);
+  const fixed = fixedCellSet(data);
 
   const knownRoomNames = new Set(data.rooms.map((r) => key(r.name)));
   const knownTeacherNames = new Set(data.teachers.map((t) => key(t.name)));
@@ -361,6 +371,7 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
   const missedDays = new Set<string>();
   const missedPeriods = new Set<string>();
   let skipped = 0;
+  let onFixed = 0;
 
   type Pending = { a: Assignment; block: boolean };
   const pending: Pending[] = [];
@@ -383,6 +394,12 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
       skipped += 1;
       continue;
     }
+    // 내보낸 격자를 되읽으면 Orientation·Closing 칸까지 딸려 온다. 고정 활동 자리는 수업이 아니다.
+    if (fixed.has(slotKey(day, period))) {
+      onFixed += 1;
+      continue;
+    }
+
     pending.push({
       a: newAssignment({
         classId: resolveClass(raw.className),
@@ -392,6 +409,7 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
         day,
         period,
         length: raw.span,
+        hideTeacher: raw.hideTeacher || undefined,
       }),
       block: raw.block,
     });
@@ -416,7 +434,8 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
     a.day === b.day &&
     a.subject === b.subject &&
     a.teacherId === b.teacherId &&
-    a.roomId === b.roomId;
+    a.roomId === b.roomId &&
+    Boolean(a.hideTeacher) === Boolean(b.hideTeacher);
   for (let i = 0; i < pending.length; i++) {
     const cur = pending[i];
     const next = pending[i + 1];
@@ -451,6 +470,8 @@ export function importSheets(data: AppData, sheets: ReadSheet[]): ImportPreview 
   }
   if (duplicates > 0) warnings.push(`같은 반의 같은 자리에 두 번 적힌 ${duplicates}칸은 앞의 것만 남겼습니다.`);
   if (skipped > 0) warnings.push(`요일·교시를 알아볼 수 없어 건너뛴 줄 ${skipped}개.`);
+  if (onFixed > 0)
+    warnings.push(`고정 활동(Orientation·Closing 등) 자리에 있던 ${onFixed}칸은 수업이 아니므로 넘겼습니다.`);
 
   return {
     assignments: sortAssignments(assignments),
@@ -488,7 +509,7 @@ export function applyImport(data: AppData, preview: ImportPreview, mode: "replac
 
 /** ── 업로드 양식 ─────────────────────────────────────── */
 
-const TEMPLATE_HEADER = ["체험반", "요일", "교시", "프로그램", "강사", "체험존", "연속"];
+const TEMPLATE_HEADER = ["체험반", "요일", "교시", "프로그램", "강사", "체험존", "연속", "강사표기"];
 
 /** 지금 입력된 값으로 예시 두 줄을 채운 빈 서식 */
 export function buildTemplate(data: AppData): Blob {
@@ -502,15 +523,19 @@ export function buildTemplate(data: AppData): Blob {
 
   const rows: XCell[][] = [
     TEMPLATE_HEADER.map((t) => ({ text: t, style: "header" as const })),
-    [cls, day, p1, "Airport & Immigration", teacher, room, "블록"].map((t) => ({
+    [cls, day, p1, "Airport & Immigration", teacher, room, "블록", ""].map((t) => ({
       text: t,
       style: "empty" as const,
     })),
-    [cls, day, p2, "Airport & Immigration", teacher, room, "블록"].map((t) => ({
+    [cls, day, p2, "Airport & Immigration", teacher, room, "블록", ""].map((t) => ({
       text: t,
       style: "empty" as const,
     })),
-    [cls, day, periods[2]?.label || "3교시", "Homeroom English", teacher, "", ""].map((t) => ({
+    [cls, day, periods[2]?.label || "3교시", "Homeroom English", teacher, "", "", ""].map((t) => ({
+      text: t,
+      style: "empty" as const,
+    })),
+    [cls, day, periods[3]?.label || "4교시", "Adventure", teacher, "", "", "숨김"].map((t) => ({
       text: t,
       style: "empty" as const,
     })),
@@ -521,13 +546,19 @@ export function buildTemplate(data: AppData): Blob {
     [{ text: "· 한 줄이 한 칸입니다. 연속 2교시는 두 줄로 적고 [연속] 칸에 '블록'이라고 씁니다.", style: "title" }],
     [{ text: "· 체험반·강사·체험존은 이름이 처음 나오면 자동으로 만들어집니다.", style: "title" }],
     [{ text: "· 요일과 교시는 [운영 시간] 탭에 있는 것만 인식합니다.", style: "title" }],
+    [
+      {
+        text: "· [강사표기] 칸에 '숨김'이라고 쓰면 체험반 시간표에는 강사가 나오지 않고 강사 시간표에만 들어갑니다.",
+        style: "title",
+      },
+    ],
   ];
 
   const sheet: XSheet = {
     name: safeSheetName("시간표", "시간표"),
-    colWidths: [14, 8, 14, 26, 14, 18, 8],
+    colWidths: [14, 8, 14, 26, 14, 18, 8, 10],
     rows: [...rows, ...guide],
-    rowHeights: [22, 20, 20, 20, 10, 18, 18, 18],
+    rowHeights: [22, 20, 20, 20, 20, 10, 18, 18, 18, 18],
     merges: [],
   };
   return buildXlsx([sheet]);
@@ -550,6 +581,7 @@ export function toTemplateRows(data: AppData, list: Assignment[]): string[][] {
         a.teacherId ? (teacherName.get(a.teacherId) ?? "") : "",
         a.roomId ? (roomName.get(a.roomId) ?? "") : "",
         a.length === 2 ? "블록" : "",
+        a.hideTeacher ? "숨김" : "",
       ]);
     }
   }

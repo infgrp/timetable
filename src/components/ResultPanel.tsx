@@ -1,26 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppData, Assignment, Lecture, SolveRequest, SolveResult, WorkerOut } from "../types";
-import { blockableFlags, buildLectures, periodsOf, validate } from "../store";
+import type { AppData, Assignment, Lecture, SolveResult, WorkerOut } from "../types";
+import { allowedDaysOf, buildSolveRequest, periodsOf, validate } from "../store";
 import { downloadBlob, downloadText, safeFileName, toCsv } from "../export";
 import { buildXlsx } from "../xlsx";
 import type { XSheet } from "../xlsx";
 import { toSheet } from "../timetableSheet";
 import { toTemplateRows } from "../importTimetable";
 import {
+  blockedBy,
   buildGrids,
   conflictLabel,
   conflictsOf,
+  dayAllowedFor,
   fits,
   fromSolveResult,
   newAssignment,
   periodsCovered,
   removeAssignment,
   setPosition,
+  sliceGrid,
   sortAssignments,
   swapPositions,
   upsert,
+  usedCells,
 } from "../assignments";
-import { BASE_ROUND, rotateAssignments } from "../rotation";
 import ImportPanel from "./ImportPanel";
 import AssignmentEditor from "./AssignmentEditor";
 import { Button, Card, Empty, Field, TextInput } from "./ui";
@@ -70,7 +73,7 @@ export default function ResultPanel({ data, set }: Props) {
   const [limitMs, setLimitMs] = useState(10000);
   const [editing, setEditing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [roundId, setRoundId] = useState<string>(BASE_ROUND.id);
+  const [segId, setSegId] = useState("");
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
@@ -82,50 +85,30 @@ export default function ResultPanel({ data, set }: Props) {
   const periods = periodsOf(data.slots);
   const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
 
-  /** ── 회차(로테이션) ─────────────────────────────── */
-  const rounds = data.rotation.rounds;
-  const round = rounds.find((r) => r.id === roundId) ?? BASE_ROUND;
-  const isBase = round.step === 0 || data.rotation.groups.length === 0;
-  const displayed = useMemo(
-    () => rotateAssignments(data.timetable, data.rotation.groups, round.step),
-    [data.timetable, data.rotation.groups, round.step],
-  );
+  /** ── 운영 구간 필터 ─────────────────────────────── */
+  const segment = data.segments.find((s) => s.id === segId) ?? null;
+  const viewDays = useMemo(() => {
+    const all = data.days.map((_, i) => i);
+    if (!segment) return all;
+    const picked = segment.days.filter((d) => d >= 0 && d < data.days.length);
+    return picked.length > 0 ? picked : all;
+  }, [segment, data.days]);
+  const dayLabels = viewDays.map((i) => data.days[i]);
+  const segSuffix = segment ? ` (${segment.name || "구간"})` : "";
 
-  /** 로테이션을 입힌 화면은 파생물이라 고칠 수 없다 — 기준안일 때만 편집한다. */
-  const canEdit = editing && isBase;
-
-  const conflicts = useMemo(() => conflictsOf(data, displayed), [data, displayed]);
+  const conflicts = useMemo(() => conflictsOf(data, data.timetable), [data]);
   const badIds = useMemo(() => new Set(conflicts.flatMap((c) => c.ids)), [conflicts]);
-  const grids = useMemo(() => buildGrids(data, displayed, badIds), [data, displayed, badIds]);
+  const grids = useMemo(() => buildGrids(data, data.timetable, badIds), [data, badIds]);
 
-  const selected = canEdit ? (data.timetable.find((a) => a.id === selectedId) ?? null) : null;
+  const selected = editing ? (data.timetable.find((a) => a.id === selectedId) ?? null) : null;
 
   /** ── 자동 배치 ──────────────────────────────────── */
   const run = (seed: number) => {
     if (data.timetable.length > 0 && !confirm("지금 구성된 시간표를 지우고 새로 배치합니다. 계속할까요?"))
       return;
     workerRef.current?.terminate();
-    const P = periods.length;
-    const lectures = buildLectures(data);
-    const req: SolveRequest = {
-      dayCount: data.days.length,
-      periodCount: P,
-      blockable: blockableFlags(data.slots),
-      lectures,
-      teacherIds: data.teachers.map((t) => t.id),
-      classIds: data.classes.map((c) => c.id),
-      roomIds: data.rooms.map((r) => r.id),
-      teacherBlocked: data.teachers.map((t) => {
-        const arr = new Array<boolean>(data.days.length * P).fill(false);
-        for (const key of t.unavailable) {
-          const [d, p] = key.split(":").map(Number);
-          if (d < data.days.length && p < P) arr[d * P + p] = true;
-        }
-        return arr;
-      }),
-      timeLimitMs: limitMs,
-      seed,
-    };
+    const req = buildSolveRequest(data, { timeLimitMs: limitMs, seed });
+    const lectures = req.lectures;
 
     const worker = new Worker(new URL("../solver.worker.ts", import.meta.url), { type: "module" });
     workerRef.current = worker;
@@ -143,7 +126,6 @@ export default function ResultPanel({ data, set }: Props) {
       }
       setSolveInfo({ result: msg, lectures });
       set((d) => ({ ...d, timetable: fromSolveResult(msg, lectures) }));
-      setRoundId(BASE_ROUND.id);
       setRunning(false);
       setProgress("");
       worker.terminate();
@@ -169,6 +151,15 @@ export default function ResultPanel({ data, set }: Props) {
       alert("먼저 [체험반·체험존] 탭에서 체험반을 만드세요.");
       return;
     }
+    const fixedName = blockedBy(data, day, period, 1);
+    if (fixedName) {
+      alert(`${fixedName} 시간이라 수업을 넣을 수 없습니다. [운영 시간] 탭에서 고정 활동을 고치세요.`);
+      return;
+    }
+    if (!dayAllowedFor(data, classId, day)) {
+      alert(`${className.get(classId) ?? "이 반"}은(는) ${data.days[day]}요일에 오지 않습니다.`);
+      return;
+    }
     const a = newAssignment({
       classId,
       teacherId: axis === "teacher" ? ownerId : null,
@@ -190,7 +181,10 @@ export default function ResultPanel({ data, set }: Props) {
     );
 
     if (target) {
-      if (!fits(data, target.day, target.period, moving.length) || !fits(data, moving.day, moving.period, target.length)) {
+      if (
+        !fits(data, target.day, target.period, moving.length) ||
+        !fits(data, moving.day, moving.period, target.length)
+      ) {
         alert("연속 2교시 자리가 맞지 않아 두 칸을 맞바꿀 수 없습니다.");
         return;
       }
@@ -202,32 +196,54 @@ export default function ResultPanel({ data, set }: Props) {
       alert("연속 2교시로 붙일 수 없는 자리입니다(뒤에 점심·쉬는시간이 있거나 마지막 교시입니다).");
       return;
     }
+    const fixedName = blockedBy(data, day, period, moving.length);
+    if (fixedName) {
+      alert(`${fixedName} 시간이라 수업을 넣을 수 없습니다.`);
+      return;
+    }
+    if (!dayAllowedFor(data, moving.classId, day)) {
+      alert(`${className.get(moving.classId) ?? "이 반"}은(는) ${data.days[day]}요일에 오지 않습니다.`);
+      return;
+    }
     putTimetable((list) => setPosition(list, id, day, period));
     setSelectedId(id);
   };
 
+  /** 격자는 고른 구간의 요일만 보여 주므로, 넘어온 열 번호를 원래 요일로 되돌린다. */
   const hooksFor = (ownerId: string, axis: Axis): EditHooks | undefined =>
-    canEdit
+    editing
       ? {
           selectedId,
           onPick: setSelectedId,
-          onAddAt: (day, period) => addAt(ownerId, axis, day, period),
-          onMove: (id, day, period) => moveInto(ownerId, axis, id, day, period),
+          onAddAt: (di, period) => addAt(ownerId, axis, viewDays[di] ?? di, period),
+          onMove: (id, di, period) => moveInto(ownerId, axis, id, viewDays[di] ?? di, period),
         }
       : undefined;
 
   /** ── 내려받기 ───────────────────────────────────── */
-  const roundSuffix = isBase ? "" : ` (${round.name})`;
-
   const exportCsv = () =>
     downloadText(
-      `${safeFileName(data.schoolName || "시간표")} 목록${roundSuffix}.csv`,
-      toCsv(toTemplateRows(data, displayed)),
+      `${safeFileName(data.schoolName || "시간표")} 목록${segSuffix}.csv`,
+      toCsv(toTemplateRows(data, visibleAssignments())),
       "text/csv;charset=utf-8",
     );
 
+  /** 구간을 골랐으면 그 요일에 걸린 칸만 */
+  function visibleAssignments(): Assignment[] {
+    if (!segment) return data.timetable;
+    const set0 = new Set(viewDays);
+    return data.timetable.filter((a) => set0.has(a.day));
+  }
+
+  const classesInSegment = segment
+    ? data.classes.filter((c) => {
+        const allowed = new Set(allowedDaysOf(data, c));
+        return viewDays.some((d) => allowed.has(d));
+      })
+    : data.classes;
+
   const targets: Target[] = (
-    kind === "class" ? data.classes : kind === "teacher" ? data.teachers : data.rooms
+    kind === "class" ? classesInSegment : kind === "teacher" ? data.teachers : data.rooms
   ).map((x) => ({ id: x.id, name: x.name || "(이름없음)" }));
 
   const kindLabel = AXIS_LABEL[kind];
@@ -236,18 +252,21 @@ export default function ResultPanel({ data, set }: Props) {
   const exact = q ? targets.find((t) => t.name.toLowerCase() === q) : undefined;
   const match = exact ?? (hits.length === 1 ? hits[0] : null);
 
-  const gridOf = (id: string, axis: Axis): Grid =>
-    (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
+  const gridOf = (id: string, axis: Axis): Grid => {
+    const full =
+      (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
+    return segment ? sliceGrid(full, viewDays) : full;
+  };
 
   const head = data.schoolName ? data.schoolName + " " : "";
   const titleOf = (name: string) =>
-    `${head}${kind === "teacher" ? `${name} 강사` : name} 시간표${roundSuffix}`;
+    `${head}${kind === "teacher" ? `${name} 강사` : name} 시간표${segSuffix}`;
 
   const sheetOf = (t: Target, sheetName: string): XSheet =>
     toSheet({
       sheetName,
       title: titleOf(t.name),
-      days: data.days,
+      days: dayLabels,
       slots: data.slots,
       grid: gridOf(t.id, kind),
     });
@@ -255,49 +274,20 @@ export default function ResultPanel({ data, set }: Props) {
   const downloadOne = () => {
     if (!match) return;
     const label = kind === "teacher" ? `${match.name} 강사` : match.name;
-    downloadBlob(`${safeFileName(label)} 시간표${roundSuffix}.xlsx`, buildXlsx([sheetOf(match, match.name)]));
+    downloadBlob(`${safeFileName(label)} 시간표${segSuffix}.xlsx`, buildXlsx([sheetOf(match, match.name)]));
   };
 
   const downloadAll = () => {
     if (targets.length === 0) return;
     const names = dedupe(targets.map((t) => t.name));
     downloadBlob(
-      `${safeFileName(data.schoolName || "시간표")} ${kindLabel}별 시간표${roundSuffix}.xlsx`,
+      `${safeFileName(data.schoolName || "시간표")} ${kindLabel}별 시간표${segSuffix}.xlsx`,
       buildXlsx(targets.map((t, i) => sheetOf(t, names[i]))),
     );
   };
 
-  /** 모든 회차 × 모든 대상을 한 파일에 — 로테이션 결과를 한꺼번에 나눠 줄 때 */
-  const downloadAllRounds = () => {
-    if (targets.length === 0 || rounds.length === 0) return;
-    const sheets: XSheet[] = [];
-    const names: string[] = [];
-    for (const r of rounds) {
-      const list = rotateAssignments(data.timetable, data.rotation.groups, r.step);
-      const g = buildGrids(data, list);
-      for (const t of targets) {
-        names.push(`${r.name} ${t.name}`);
-        sheets.push(
-          toSheet({
-            sheetName: `${r.name} ${t.name}`,
-            title: `${head}${kind === "teacher" ? `${t.name} 강사` : t.name} 시간표 (${r.name})`,
-            days: data.days,
-            slots: data.slots,
-            grid:
-              (kind === "class" ? g.byClass : kind === "teacher" ? g.byTeacher : g.byRoom).get(t.id) ?? [],
-          }),
-        );
-      }
-    }
-    const unique = dedupe(names);
-    downloadBlob(
-      `${safeFileName(data.schoolName || "시간표")} ${kindLabel}별 회차 전체.xlsx`,
-      buildXlsx(sheets.map((s, i) => ({ ...s, name: unique[i].slice(0, 31) }))),
-    );
-  };
-
   const hasTimetable = data.timetable.length > 0;
-  const viewTargets = view === "class" ? data.classes : view === "teacher" ? data.teachers : data.rooms;
+  const viewTargets = view === "class" ? classesInSegment : view === "teacher" ? data.teachers : data.rooms;
 
   return (
     <div className="flex flex-col gap-5">
@@ -343,9 +333,18 @@ export default function ResultPanel({ data, set }: Props) {
           {progress && <span className="text-sm text-tt-600">{progress}</span>}
         </div>
 
+        {data.segments.length > 0 && (
+          <p className="mt-3 text-sm text-tt-600">
+            운영 구간 {data.segments.length}개가 있습니다. 한 번에 함께 풀고, 각 반은 자기 구간의 요일에만
+            들어갑니다 — 강사·체험존이 구간을 넘어 겹치는 일도 함께 막습니다.
+          </p>
+        )}
+
         {errors.length > 0 && (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-            <p className="mb-1 font-semibold">자동 배치를 하려면 먼저 고쳐야 합니다 (엑셀 올리기·직접 입력에는 상관없습니다)</p>
+            <p className="mb-1 font-semibold">
+              자동 배치를 하려면 먼저 고쳐야 합니다 (엑셀 올리기·직접 입력에는 상관없습니다)
+            </p>
             <ul className="space-y-1">
               {errors.map((i, n) => (
                 <li key={n}>• {i.text}</li>
@@ -371,7 +370,9 @@ export default function ResultPanel({ data, set }: Props) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-3">
                 {solveInfo && (
-                  <p className={`text-sm font-semibold ${solveInfo.result.ok ? "text-emerald-700" : "text-amber-700"}`}>
+                  <p
+                    className={`text-sm font-semibold ${solveInfo.result.ok ? "text-emerald-700" : "text-amber-700"}`}
+                  >
                     {solveInfo.result.ok ? "✔ " : "⚠ "}
                     {solveInfo.result.message}
                     <span className="ml-2 font-normal text-tt-500">
@@ -405,56 +406,28 @@ export default function ResultPanel({ data, set }: Props) {
               </div>
             </div>
 
-            {rounds.length > 0 && (
-              <div className="no-print mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-tt-200 bg-tt-50 p-3">
-                <div className="w-48">
-                  <Field label="로테이션 회차">
-                    <select
-                      value={round.id}
-                      onChange={(e) => {
-                        setRoundId(e.target.value);
-                        setSelectedId(null);
-                      }}
-                      className="w-full rounded-lg border border-tt-300 bg-white px-2.5 py-1.5 text-sm"
-                    >
-                      <option value={BASE_ROUND.id}>{BASE_ROUND.name}</option>
-                      {rounds.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name} ({r.step}칸 이동)
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                </div>
-                <p className="flex-1 text-sm text-tt-600">
-                  {isBase
-                    ? "지금은 기준 시간표입니다. 회차를 고르면 담당 강사만 바뀐 시간표를 볼 수 있습니다."
-                    : `${round.name} — 시간표는 그대로, 담당 강사만 ${round.step}칸 밀었습니다. 이 화면은 파생물이라 고칠 수 없습니다.`}
-                </p>
-                {!isBase && (
+            {data.segments.length > 0 && (
+              <div className="no-print mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-tt-200 bg-tt-50 p-3">
+                <span className="text-xs font-semibold text-tt-700">보이는 구간</span>
+                <Button variant={segId === "" ? "primary" : "ghost"} onClick={() => setSegId("")}>
+                  전체 ({data.days.join("")})
+                </Button>
+                {data.segments.map((s) => (
                   <Button
-                    onClick={() => {
-                      if (!confirm(`${round.name}의 강사 배치를 기준 시간표로 확정합니다. 계속할까요?`)) return;
-                      set((d) => ({ ...d, timetable: displayed }));
-                      setRoundId(BASE_ROUND.id);
-                    }}
+                    key={s.id}
+                    variant={segId === s.id ? "primary" : "ghost"}
+                    onClick={() => setSegId(s.id)}
                   >
-                    이 회차를 기준안으로 확정
+                    {s.name || "(이름없음)"}
                   </Button>
-                )}
+                ))}
               </div>
             )}
 
-            {editing && !isBase && (
-              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                회차 화면에서는 고칠 수 없습니다. 위에서 <b>기준안</b>을 고르고 수정하세요.
-              </p>
-            )}
-
-            {canEdit && (
+            {editing && (
               <p className="mt-3 rounded-lg border border-tt-300 bg-tt-50 p-3 text-sm text-tt-700">
                 칸을 눌러 내용을 고치고, 끌어다 놓아 자리를 옮깁니다. 이미 찬 자리에 놓으면 두 칸이 맞바뀝니다.
-                빈 칸의 <b>+</b> 를 누르면 새 칸이 생깁니다.
+                빈 칸의 <b>+</b> 를 누르면 새 칸이 생깁니다. 노란 칸(고정 활동)은 옮길 수 없습니다.
               </p>
             )}
 
@@ -462,19 +435,18 @@ export default function ResultPanel({ data, set }: Props) {
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm">
                 <p className="mb-2 font-semibold text-red-700">
                   겹치는 곳 {conflicts.length}건 — 표에서 빨갛게 표시됩니다
-                  {isBase && <span className="font-normal"> · 항목을 누르면 그 칸을 바로 고칠 수 있습니다</span>}
+                  <span className="font-normal"> · 항목을 누르면 그 칸을 바로 고칠 수 있습니다</span>
                 </p>
                 <ul className="space-y-1 text-red-700">
                   {conflicts.slice(0, 10).map((c, i) => (
                     <li key={i}>
                       <button
                         type="button"
-                        disabled={!isBase}
                         onClick={() => {
                           setEditing(true);
                           setSelectedId(c.ids[c.ids.length - 1]);
                         }}
-                        className="text-left underline-offset-2 hover:underline disabled:no-underline"
+                        className="text-left underline-offset-2 hover:underline"
                       >
                         <b>[{conflictLabel(c.kind)}]</b> {c.text}
                       </button>
@@ -573,11 +545,6 @@ export default function ResultPanel({ data, set }: Props) {
                 {match ? `${match.name} 시간표 받기` : "엑셀(.xlsx) 받기"}
               </Button>
               <Button onClick={downloadAll}>전체 {kindLabel} 한 파일로</Button>
-              {rounds.length > 0 && (
-                <Button onClick={downloadAllRounds} title="회차 × 대상마다 시트 한 장씩">
-                  회차 전체 한 파일로
-                </Button>
-              )}
               <Button onClick={exportCsv}>전체 목록 CSV</Button>
             </div>
 
@@ -595,25 +562,25 @@ export default function ResultPanel({ data, set }: Props) {
         </>
       )}
 
-      {(hasTimetable || canEdit) && (
+      {(hasTimetable || editing) && (
         <div className="grid gap-5 xl:grid-cols-2">
           {viewTargets.map((x) => {
             const g = gridOf(x.id, view);
-            const used = g.flat().filter((cell) => cell !== null).length;
+            const used = usedCells(g);
             const name = x.name || "(이름없음)";
-            const capacity = periods.length * data.days.length;
+            const capacity = periods.length * viewDays.length;
             return (
               <Timetable
                 key={x.id}
-                title={`${view === "teacher" ? `${name} 강사` : `${head}${name}`}${roundSuffix}`}
+                title={`${view === "teacher" ? `${name} 강사` : `${head}${name}`}${segSuffix}`}
                 subtitle={
                   view === "class"
-                    ? `주 ${used}시간 · 빈 칸 ${capacity - used}`
+                    ? `주 ${used}시간 · 빈 칸 ${Math.max(0, capacity - used)}`
                     : view === "teacher"
                       ? `주 ${used}시간`
                       : `사용 ${used}/${capacity}칸 (${capacity ? Math.round((used / capacity) * 100) : 0}%)`
                 }
-                days={data.days}
+                days={dayLabels}
                 slots={data.slots}
                 grid={g}
                 edit={hooksFor(x.id, view)}
@@ -623,7 +590,7 @@ export default function ResultPanel({ data, set }: Props) {
         </div>
       )}
 
-      {!hasTimetable && !canEdit && !running && (
+      {!hasTimetable && !editing && !running && (
         <Empty>
           [자동으로 시간표 만들기]로 새로 짜거나, 위에서 이미 쓰고 있는 엑셀을 올리거나, [빈 시간표에 직접
           입력]으로 손수 채울 수 있습니다.
