@@ -4,61 +4,66 @@ import { ALL_DAYS, DEFAULT_GEN, generateSlots, periodsOf, uid } from "../store";
 import type { SlotGenOptions } from "../store";
 import { Button, Card, Field, Select, TextInput } from "./ui";
 import FixedActivitiesCard from "./FixedActivitiesCard";
+import { changeDays, changeSlots, slotsFor } from "../calendar";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
 export default function SlotsPanel({ data, set }: Props) {
   const [gen, setGen] = useState<SlotGenOptions>(DEFAULT_GEN);
+  const [selectedDay, setSelectedDay] = useState("");
+  const dayName = data.days.includes(selectedDay) ? selectedDay : "";
+  const slots = dayName ? slotsFor(data, data.days.indexOf(dayName)) : data.slots;
+  const updateSlots = (fn: (slots: DaySlot[]) => DaySlot[], byIndex = false) =>
+    set((d) => changeSlots(d, dayName, fn(dayName ? slotsFor(d, d.days.indexOf(dayName)) : d.slots), byIndex));
 
   const toggleDay = (day: string) => {
+    const removedCount = data.timetable.filter((a) => data.days[a.day] === day).length;
+    if (data.days.includes(day) && removedCount && !confirm(`${day}요일을 해제하면 그날의 수업 ${removedCount}개가 삭제됩니다. 다른 요일의 배정은 유지됩니다. 계속할까요?`)) return;
     set((d) => {
       const has = d.days.includes(day);
       const days = has ? d.days.filter((x) => x !== day) : [...d.days, day];
       days.sort((a, b) => ALL_DAYS.indexOf(a) - ALL_DAYS.indexOf(b));
-      return { ...d, days };
+      return changeDays(d, days);
     });
   };
 
   const patchSlot = (id: string, patch: Partial<DaySlot>) =>
-    set((d) => ({ ...d, slots: d.slots.map((s) => (s.id === id ? { ...s, ...patch } : s)) }));
+    updateSlots((current) => current.map((s) => (s.id === id ? { ...s, ...patch } : s)));
 
   const removeSlot = (id: string) =>
-    set((d) => ({ ...d, slots: d.slots.filter((s) => s.id !== id) }));
+    updateSlots((current) => current.filter((s) => s.id !== id));
 
   const moveSlot = (id: string, dir: -1 | 1) =>
-    set((d) => {
-      const i = d.slots.findIndex((s) => s.id === id);
+    updateSlots((current) => {
+      const i = current.findIndex((s) => s.id === id);
       const j = i + dir;
-      if (i < 0 || j < 0 || j >= d.slots.length) return d;
-      const slots = [...d.slots];
+      if (i < 0 || j < 0 || j >= current.length) return current;
+      const slots = [...current];
       [slots[i], slots[j]] = [slots[j], slots[i]];
-      return { ...d, slots };
+      return slots;
     });
 
   const addSlot = (kind: DaySlot["kind"]) =>
-    set((d) => {
-      const last = d.slots[d.slots.length - 1];
-      return {
-        ...d,
-        slots: [
-          ...d.slots,
+    updateSlots((current) => {
+      const last = current[current.length - 1];
+      return [
+          ...current,
           {
             id: uid("slot"),
             kind,
-            label: kind === "period" ? `${periodsOf(d.slots).length + 1}교시` : "쉬는시간",
+            label: kind === "period" ? `${periodsOf(current).length + 1}교시` : "쉬는시간",
             start: last?.end ?? "09:00",
             end: last?.end ?? "09:00",
           },
-        ],
-      };
+        ];
     });
 
   const regenerate = () => {
-    if (data.slots.length > 0 && !confirm("현재 교시 구성을 지우고 새로 만듭니다. 계속할까요?")) return;
-    set((d) => ({ ...d, slots: generateSlots(gen) }));
+    if (slots.length > 0 && !confirm(`${dayName || "공통"} 교시 구성을 새로 만듭니다. 교시 번호는 유지되며, 줄어든 교시의 배정은 삭제됩니다. 계속할까요?`)) return;
+    updateSlots(() => generateSlots(gen), true);
   };
 
-  const periodCount = periodsOf(data.slots).length;
+  const periodCount = periodsOf(slots).length;
 
   return (
     <div className="flex flex-col gap-5">
@@ -95,8 +100,23 @@ export default function SlotsPanel({ data, set }: Props) {
         </div>
       </Card>
 
+      <Card title="시간 구성을 적용할 요일" desc="공통 구성을 사용하거나 요일별로 시작 시각, 교시 길이, 점심 위치를 따로 정할 수 있습니다.">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select aria-label="시간 구성 요일" value={dayName} onChange={(e) => setSelectedDay(e.target.value)}>
+            <option value="">공통 (별도 설정이 없는 요일)</option>
+            {data.days.map((d) => <option key={d} value={d}>{d}요일{data.daySlots?.[d] ? " · 별도 구성" : " · 공통 사용"}</option>)}
+          </Select>
+          {dayName && data.daySlots?.[dayName] && <Button onClick={() => set((d) => {
+            const next = changeSlots(d, dayName, d.slots, true);
+            const daySlots = { ...next.daySlots };
+            delete daySlots[dayName];
+            return { ...next, daySlots };
+          })}>이 요일을 공통 구성으로 되돌리기</Button>}
+        </div>
+      </Card>
+
       <Card
-        title="교시 자동 생성"
+        title={`교시 자동 생성 · ${dayName || "공통"}`}
         desc="1교시 시작 시각과 길이를 넣으면 점심시간까지 포함해 하루 구성을 만들어 줍니다. 체험센터는 보통 40분 6교시로 운영합니다."
       >
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
@@ -178,7 +198,7 @@ export default function SlotsPanel({ data, set }: Props) {
               </tr>
             </thead>
             <tbody>
-              {data.slots.map((s) => (
+              {slots.map((s) => (
                 <tr key={s.id} className="border-b border-tt-100 last:border-0">
                   <td className="py-1.5 pr-2">
                     <Select

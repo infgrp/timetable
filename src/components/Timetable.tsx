@@ -1,5 +1,6 @@
 import type { DragEvent } from "react";
 import type { DaySlot } from "../types";
+import DailyTimetableBody from "./DailyTimetableBody";
 
 export type Cell = {
   top: string;
@@ -42,6 +43,7 @@ export default function Timetable({
   slots,
   grid,
   edit,
+  daySlots,
 }: {
   title: string;
   subtitle?: string;
@@ -49,6 +51,7 @@ export default function Timetable({
   slots: DaySlot[];
   grid: Grid;
   edit?: EditHooks;
+  daySlots?: Record<string, DaySlot[]>;
 }) {
   let periodIndex = -1;
   return (
@@ -75,7 +78,7 @@ export default function Timetable({
               ))}
             </tr>
           </thead>
-          <tbody>
+          {daySlots && days.some((d) => daySlots[d]) ? <DailyTimetableBody days={days} slots={slots} daySlots={daySlots} grid={grid} edit={edit} /> : <tbody>
             {slots.map((slot) => {
               if (slot.kind === "break") {
                 return (
@@ -172,7 +175,7 @@ export default function Timetable({
                 </tr>
               );
             })}
-          </tbody>
+          </tbody>}
         </table>
       </div>
     </div>

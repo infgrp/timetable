@@ -8,8 +8,20 @@
  * [다음으로 돌리기]를 누른 그 순간 timetable 의 강사가 실제로 바뀌고 기록이 남는다.
  * 그래서 화면·엑셀·인쇄는 언제나 "지금 유효한 시간표" 하나만 보면 된다.
  */
-import type { Assignment, RotationConfig, RotationGroup, RotationTurn } from "./types";
+import type { AppData, Assignment, RotationConfig, RotationGroup, RotationTurn } from "./types";
 import { uid } from "./store";
+import { conflictsOf } from "./assignments";
+
+export function rotationIssues(groups: RotationGroup[], teacherIds?: string[]): string[] {
+  const seen = new Set<string>();
+  const errors: string[] = [];
+  for (const g of groups) for (const id of g.teacherIds) {
+    if (!id || (teacherIds && !teacherIds.includes(id))) errors.push("로테이션 조에 삭제되었거나 지정되지 않은 강사가 있습니다.");
+    if (seen.has(id)) errors.push("한 강사는 하나의 로테이션 조에 한 번만 들어갈 수 있습니다.");
+    seen.add(id);
+  }
+  return [...new Set(errors)];
+}
 
 export function newGroup(name: string, teacherIds: string[] = []): RotationGroup {
   return { id: uid("g"), name, teacherIds };
@@ -20,6 +32,8 @@ export function newGroup(name: string, teacherIds: string[] = []): RotationGroup
  * 배치를 갈아끼우려면 반대 방향이 필요하다 — j번 강사의 칸은 (j-step)번 강사에게 간다.
  */
 export function rotationMap(groups: RotationGroup[], step: number): Map<string, string> {
+  const errors = rotationIssues(groups);
+  if (errors.length) throw new Error(errors.join("\n"));
   const map = new Map<string, string>();
   for (const g of groups) {
     const ids = g.teacherIds.filter(Boolean);
@@ -54,7 +68,47 @@ export function rotationPlan(group: RotationGroup, step: number): { teacherId: s
 
 /** 조 하나라도 2명 이상이어야 돌릴 의미가 있다. */
 export function canRotate(config: RotationConfig): boolean {
-  return config.groups.some((g) => g.teacherIds.filter(Boolean).length >= 2);
+  return rotationIssues(config.groups).length === 0 && config.groups.some((g) => g.teacherIds.filter(Boolean).length >= 2);
+}
+
+export function previewRotation(data: AppData, step = 1): { timetable: Assignment[]; errors: string[] } {
+  const errors = rotationIssues(data.rotation.groups, data.teachers.map((t) => t.id));
+  if (errors.length) return { timetable: data.timetable, errors };
+  const timetable = rotateAssignments(data.timetable, data.rotation.groups, step);
+  return { timetable, errors: conflictsOf(data, timetable).map((c) => c.text) };
+}
+
+export function applyRotation(data: AppData, note: string): AppData {
+  if (!canRotate(data.rotation) || !data.timetable.length) throw new Error("시간표와 2명 이상의 로테이션 조가 필요합니다.");
+  const preview = previewRotation(data);
+  if (preview.errors.length) throw new Error(preview.errors.join("\n"));
+  const changes = data.timetable.flatMap((a, i) => a.teacherId === preview.timetable[i].teacherId ? [] : [
+    { assignmentId: a.id, before: a.teacherId, after: preview.timetable[i].teacherId },
+  ]);
+  if (!changes.length) throw new Error("이 조에 해당하는 수업이 없어 변경할 담당자가 없습니다.");
+  const turns = data.rotation.turns + 1;
+  return { ...data, timetable: preview.timetable, rotation: {
+    ...data.rotation, turns, log: [{ ...newTurn(turns, note), changes }, ...data.rotation.log].slice(0, 60),
+  } };
+}
+
+export function previewUndo(data: AppData): { timetable: Assignment[]; errors: string[] } {
+  const changes = data.rotation.log[0]?.changes;
+  if (!changes?.length) return { timetable: data.timetable, errors: ["되돌릴 담당자 기록이 없습니다. 이전 버전의 기록은 되돌릴 수 없습니다."] };
+  const byId = new Map(data.timetable.map((a) => [a.id, a]));
+  if (changes.some((c) => !byId.has(c.assignmentId) || byId.get(c.assignmentId)!.teacherId !== c.after))
+    return { timetable: data.timetable, errors: ["마지막 로테이션 이후 해당 수업이 삭제·재생성되었거나 담당자가 수정되어 되돌릴 수 없습니다."] };
+  const before = new Map(changes.map((c) => [c.assignmentId, c.before]));
+  const timetable = data.timetable.map((a) => before.has(a.id) ? { ...a, teacherId: before.get(a.id)! } : a);
+  const errors = conflictsOf(data, timetable).map((c) => c.text);
+  if (changes.some((c) => c.before && !data.teachers.some((t) => t.id === c.before))) errors.push("복구할 강사가 삭제되었습니다.");
+  return { timetable, errors };
+}
+
+export function undoRotation(data: AppData): AppData {
+  const preview = previewUndo(data);
+  if (preview.errors.length) throw new Error(preview.errors.join("\n"));
+  return { ...data, timetable: preview.timetable, rotation: { ...data.rotation, turns: Math.max(0, data.rotation.turns - 1), log: data.rotation.log.slice(1) } };
 }
 
 /** 한 바퀴가 몇 칸인지 (조마다 인원이 다르면 최소공배수) */

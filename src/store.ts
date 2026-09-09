@@ -10,6 +10,7 @@ import type {
   SolveRequest,
   Teacher,
 } from "./types";
+import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
 
 export const STORAGE_KEY = "timetable.data.v1";
 
@@ -121,7 +122,10 @@ export function defaultData(): AppData {
     schoolName: "",
     days: ["월", "화", "수", "목", "금"],
     slots: generateSlots(DEFAULT_GEN),
-    fixedActivities: [],
+    fixedActivities: [
+      { id: uid("f"), name: "Orientation", cells: ["0:0", "2:0"] },
+      { id: uid("f"), name: "Closing", cells: ["1:5", "4:5"] },
+    ],
     segments: [],
     classes,
     rooms: [],
@@ -179,7 +183,11 @@ export function slotKey(day: number, period: number): string {
 export function fixedCellNames(data: AppData): Map<string, string> {
   const map = new Map<string, string>();
   for (const f of data.fixedActivities) {
-    for (const key of f.cells) if (!map.has(key)) map.set(key, f.name || "고정");
+    for (const key of f.cells) {
+      const [d, p] = key.split(":").map(Number);
+      if (d >= 0 && d < data.days.length && p >= 0 && p < dayPeriods(data, d).length && !map.has(key))
+        map.set(key, f.name || "고정");
+    }
   }
   return map;
 }
@@ -202,25 +210,29 @@ export function allowedDaysOf(data: AppData, klass: Klass): number[] {
   const all = data.days.map((_, i) => i);
   if (!seg) return all;
   const picked = seg.days.filter((d) => d >= 0 && d < data.days.length);
-  // 구간이 비어 있으면 제약이 없는 것으로 본다 (실수로 요일을 다 끈 경우 배치가 통째로 막히지 않도록).
-  return picked.length > 0 ? picked : all;
+  return picked;
 }
 
 /** 이 체험반이 실제로 쓸 수 있는 칸 수 (구간 요일 × 교시 − 고정 활동) */
 export function classCapacity(data: AppData, klass: Klass): number {
-  const P = periodsOf(data.slots).length;
   const fixed = fixedCellSet(data);
   let n = 0;
   for (const d of allowedDaysOf(data, klass)) {
-    for (let p = 0; p < P; p++) if (!fixed.has(slotKey(d, p))) n += 1;
+    for (let p = 0; p < dayPeriods(data, d).length; p++) if (!fixed.has(slotKey(d, p))) n += 1;
   }
   return n;
 }
 
 /** 강사·체험존이 쓸 수 있는 칸 수 (운영 요일 전체 − 고정 활동) */
 export function weekCapacity(data: AppData): number {
-  const P = periodsOf(data.slots).length;
-  return P * data.days.length - fixedCellSet(data).size;
+  return data.days.reduce((n, _, d) => n + dayPeriods(data, d).length, 0) - fixedCellSet(data).size;
+}
+
+export function capacityForDays(data: AppData, days: number[], classId?: string): number {
+  const klass = data.classes.find((c) => c.id === classId);
+  const allowed = new Set(klass ? allowedDaysOf(data, klass) : days);
+  const fixed = fixedCellSet(data);
+  return days.reduce((n, d) => n + (allowed.has(d) ? dayPeriods(data, d).filter((_, p) => !fixed.has(slotKey(d, p))).length : 0), 0);
 }
 
 export function buildLectures(data: AppData): Lecture[] {
@@ -253,21 +265,34 @@ export function buildLectures(data: AppData): Lecture[] {
  */
 export function buildSolveRequest(
   data: AppData,
-  opt: { timeLimitMs: number; seed: number },
+  opt: { timeLimitMs: number; seed: number; reserved?: AppData["timetable"] },
 ): SolveRequest {
-  const P = periodsOf(data.slots).length;
+  const P = calendarPeriods(data).length;
   const D = data.days.length;
   const fixed = fixedCellSet(data);
 
   const blockedCells = new Array<boolean>(D * P).fill(false);
   for (let d = 0; d < D; d++) {
-    for (let p = 0; p < P; p++) if (fixed.has(slotKey(d, p))) blockedCells[d * P + p] = true;
+    for (let p = 0; p < P; p++)
+      if (p >= dayPeriods(data, d).length || fixed.has(slotKey(d, p))) blockedCells[d * P + p] = true;
   }
+
+  const reserved = (ids: string[], key: "teacherId" | "roomId") => ids.map((id) => {
+    const cells = new Array<boolean>(D * P).fill(false);
+    for (const a of opt.reserved ?? []) {
+      if (a[key] !== id || a.day < 0 || a.day >= D) continue;
+      for (let k = 0; k < a.length; k++) if (a.period + k >= 0 && a.period + k < P) cells[a.day * P + a.period + k] = true;
+    }
+    return cells;
+  });
 
   return {
     dayCount: D,
     periodCount: P,
     blockable: blockableFlags(data.slots),
+    blockableByDay: data.days.map((_, d) => blockableFlags(slotsFor(data, d))),
+    reservedTeacherCells: reserved(data.teachers.map((t) => t.id), "teacherId"),
+    reservedRoomCells: reserved(data.rooms.map((r) => r.id), "roomId"),
     lectures: buildLectures(data),
     teacherIds: data.teachers.map((t) => t.id),
     classIds: data.classes.map((c) => c.id),
@@ -276,7 +301,7 @@ export function buildSolveRequest(
       const arr = new Array<boolean>(D * P).fill(false);
       for (const key of t.unavailable) {
         const [d, p] = key.split(":").map(Number);
-        if (d < D && p < P) arr[d * P + p] = true;
+        if (d >= 0 && d < D && p >= 0 && p < P) arr[d * P + p] = true;
       }
       return arr;
     }),
@@ -295,7 +320,7 @@ export type Issue = { level: "error" | "warn"; text: string };
 /** 풀기 전에 명백히 불가능하거나 의심스러운 입력을 걸러낸다. */
 export function validate(data: AppData): Issue[] {
   const issues: Issue[] = [];
-  const P = periodsOf(data.slots).length;
+  const P = calendarPeriods(data).length;
   const D = data.days.length;
   const fixed = fixedCellSet(data);
   const capacity = weekCapacity(data);
@@ -304,11 +329,23 @@ export function validate(data: AppData): Issue[] {
   if (P === 0) issues.push({ level: "error", text: "프로그램 교시가 하나도 없습니다." });
   if (data.classes.length === 0) issues.push({ level: "error", text: "체험반이 없습니다." });
 
+  for (let d = 0; d < D; d++) {
+    let previousEnd = -1;
+    for (const slot of slotsFor(data, d)) {
+      const valid = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
+      const start = parseHHMM(slot.start);
+      const end = parseHHMM(slot.end);
+      if (!valid.test(slot.start) || !valid.test(slot.end) || start >= end || start < previousEnd)
+        issues.push({ level: "error", text: `${data.days[d]}요일 ${slot.label}: 시각이 올바르지 않거나 앞 시간과 겹칩니다. [운영 시간]에서 확인하세요.` });
+      previousEnd = end;
+    }
+  }
+
   for (const seg of data.segments) {
     if (seg.days.filter((d) => d >= 0 && d < D).length === 0)
       issues.push({
-        level: "warn",
-        text: `운영 구간 "${seg.name || "(이름없음)"}"에 요일이 없습니다. 이 구간의 체험반은 모든 요일을 씁니다.`,
+        level: data.classes.some((c) => c.segmentId === seg.id) ? "error" : "warn",
+        text: `운영 구간 "${seg.name || "(이름없음)"}"에 요일이 없습니다. 요일을 지정해야 배치할 수 있습니다.`,
       });
   }
 
@@ -352,7 +389,7 @@ export function validate(data: AppData): Issue[] {
     // 고정 활동 칸은 이미 capacity 에서 빠졌으므로 회피 시간에서도 빼서 두 번 세지 않는다.
     const blockedInRange = t.unavailable.filter((key) => {
       const [d, p] = key.split(":").map(Number);
-      return d < D && p < P && !fixed.has(key);
+      return d >= 0 && d < D && p >= 0 && p < dayPeriods(data, d).length && !fixed.has(key);
     }).length;
     const free = capacity - blockedInRange;
     if (h > free)
@@ -392,9 +429,9 @@ export function validate(data: AppData): Issue[] {
   }
 
   // 블록을 놓을 자리가 있는지 — 고정 활동에 막히지 않은 자리가 하나라도 있어야 한다.
-  const flags = blockableFlags(data.slots);
   let blockSlots = 0;
   for (let d = 0; d < D; d++) {
+    const flags = blockableFlags(slotsFor(data, d));
     for (let p = 0; p + 1 < P; p++) {
       if (!flags[p]) continue;
       if (fixed.has(slotKey(d, p)) || fixed.has(slotKey(d, p + 1))) continue;
@@ -444,6 +481,7 @@ export function migrate(raw: unknown): AppData | null {
     version: 3,
     fixedActivities: Array.isArray(parsed.fixedActivities) ? parsed.fixedActivities : [],
     segments: Array.isArray(parsed.segments) ? parsed.segments : [],
+    daySlots: parsed.daySlots && typeof parsed.daySlots === "object" ? parsed.daySlots : {},
     classes: Array.isArray(parsed.classes) ? parsed.classes : base.classes,
     timetable: Array.isArray(parsed.timetable) ? parsed.timetable : [],
     rotation: {

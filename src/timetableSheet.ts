@@ -2,6 +2,7 @@ import type { DaySlot } from "./types";
 import type { Grid } from "./components/Timetable";
 import type { CellStyle, XCell, XSheet } from "./xlsx";
 import { safeSheetName } from "./xlsx";
+import { scheduleRows } from "./scheduleLayout";
 
 /** 화면에 그린 격자를 그대로 엑셀 시트 한 장으로 옮긴다. */
 export function toSheet(opts: {
@@ -10,6 +11,7 @@ export function toSheet(opts: {
   days: string[];
   slots: DaySlot[];
   grid: Grid;
+  daySlots?: Record<string, DaySlot[]>;
 }): XSheet {
   const { days, slots, grid } = opts;
   const cols = days.length + 1;
@@ -32,6 +34,27 @@ export function toSheet(opts: {
   days.forEach((d, i) => (head[i + 1] = { text: d, style: "header" }));
   rows.push(head);
   rowHeights.push(22);
+
+  if (opts.daySlots && days.some((d) => opts.daySlots?.[d])) {
+    for (const layout of scheduleRows(days, slots, opts.daySlots, grid)) {
+      const r = rows.length;
+      const row = blankRow();
+      row[0] = { text: layout.label, style: "timeCol" };
+      layout.entries.forEach((entry, d) => {
+        if (entry.continuation) return;
+        const { cell, slot } = entry;
+        const time = slot ? `${slot.start}~${slot.end}` : "";
+        row[d + 1] = {
+          text: slot?.kind === "break" ? `${slot.label} · ${time}` : cell ? `${cell.top}\n${cell.bottom ?? ""}\n${time}` : time,
+          style: cell?.fixed || slot?.kind === "break" ? "lunch" : cell ? `subject${cell.hue % 8}` as CellStyle : "empty",
+        };
+        if (entry.span > 1) merges.push({ r1: r, c1: d + 1, r2: r + entry.span - 1, c2: d + 1 });
+      });
+      rows.push(row);
+      rowHeights.push(layout.label === "휴식" ? 28 : 48);
+    }
+    return { name: safeSheetName(opts.sheetName, "시간표"), colWidths: [11, ...days.map(() => 20)], rows, rowHeights, merges };
+  }
 
   let periodIndex = -1;
   for (const slot of slots) {

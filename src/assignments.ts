@@ -5,9 +5,10 @@
  * 화면 격자·엑셀 내보내기·로테이션은 모두 이 목록만 읽는다.
  */
 import type { AppData, Assignment, Lecture, SolveResult } from "./types";
-import { allowedDaysOf, blockableFlags, fixedCellNames, periodsOf, slotKey, uid } from "./store";
+import { allowedDaysOf, blockableFlags, fixedCellNames, slotKey, uid } from "./store";
 import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
+import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
 
 export function newAssignment(init: Partial<Assignment> = {}): Assignment {
   return {
@@ -56,10 +57,10 @@ export function periodsCovered(a: Assignment): number[] {
 
 /** 지정한 자리에 이 길이가 들어갈 수 있는지 (칸 범위 + 연속 2교시 자리) */
 export function fits(data: AppData, day: number, period: number, length: 1 | 2): boolean {
-  const P = periodsOf(data.slots).length;
+  const P = dayPeriods(data, day).length;
   if (day < 0 || day >= data.days.length) return false;
   if (period < 0 || period + length > P) return false;
-  if (length === 2 && !blockableFlags(data.slots)[period]) return false;
+  if (length === 2 && !blockableFlags(slotsFor(data, day))[period]) return false;
   return true;
 }
 
@@ -136,9 +137,8 @@ export function conflictLabel(kind: Conflict["kind"]): string {
  */
 export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   const out: Conflict[] = [];
-  const periods = periodsOf(data.slots);
+  const periods = calendarPeriods(data);
   const P = periods.length;
-  const flags = blockableFlags(data.slots);
   const fixed = fixedCellNames(data);
   const classById = new Map(data.classes.map((c) => [c.id, c]));
   const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
@@ -152,7 +152,7 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   for (const a of list) {
     if (!fits(data, a.day, a.period, a.length)) {
       const why =
-        a.length === 2 && a.period + 1 < P && !flags[a.period]
+        a.length === 2 && a.period + 1 < P && !blockableFlags(slotsFor(data, a.day))[a.period]
           ? "연속 2교시로 붙일 수 없는 자리입니다(사이에 점심·쉬는시간)."
           : "운영 요일·교시 범위를 벗어났습니다.";
       out.push({
@@ -265,7 +265,7 @@ export type Grids = {
 };
 
 export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<string>): Grids {
-  const periods = periodsOf(data.slots);
+  const periods = calendarPeriods(data);
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
   const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
   const roomName = new Map(data.rooms.map((r) => [r.id, r.name || "(이름없음)"]));
@@ -284,7 +284,7 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
     const [d, p] = key.split(":").map(Number);
     if (!(d >= 0 && d < data.days.length && p >= 0 && p < periods.length)) continue;
     const cell: Cell = { top: name, span: 1, hue: 0, fixed: true };
-    for (const grid of byClass.values()) grid[p][d] = cell;
+    for (const c of data.classes) if (allowedDaysOf(data, c).includes(d)) byClass.get(c.id)![p][d] = cell;
     for (const grid of byTeacher.values()) grid[p][d] = cell;
   }
 
@@ -292,7 +292,7 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
     if (!grid) return;
     if (!grid[a.period] || a.period + a.length > periods.length) return;
     // 이미 찬 자리면 덮어쓰지 않는다 — 겹침은 충돌 목록이 알린다.
-    if (grid[a.period][a.day]) return;
+    if (Array.from({ length: a.length }, (_, k) => grid[a.period + k]?.[a.day]).some(Boolean)) return;
     grid[a.period][a.day] = cell;
     for (let k = 1; k < a.length; k++) {
       if (grid[a.period + k]) grid[a.period + k][a.day] = "cont";

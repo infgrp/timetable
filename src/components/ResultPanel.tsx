@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppData, Assignment, Lecture, SolveResult, WorkerOut } from "../types";
-import { allowedDaysOf, buildSolveRequest, periodsOf, validate } from "../store";
+import { allowedDaysOf, buildSolveRequest, capacityForDays, validate } from "../store";
+import { mergeSolved, scopeData } from "../calendar";
 import { downloadBlob, downloadText, safeFileName, toCsv } from "../export";
 import { buildXlsx } from "../xlsx";
 import type { XSheet } from "../xlsx";
@@ -74,15 +75,18 @@ export default function ResultPanel({ data, set }: Props) {
   const [editing, setEditing] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [segId, setSegId] = useState("");
+  const [solveSegmentId, setSolveSegmentId] = useState("");
   const workerRef = useRef<Worker | null>(null);
+  const latestData = useRef(data);
+  latestData.current = data;
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
-  const issues = useMemo(() => validate(data), [data]);
+  const solveData = useMemo(() => scopeData(data, solveSegmentId), [data, solveSegmentId]);
+  const issues = useMemo(() => validate(solveData), [solveData]);
   const errors = issues.filter((i) => i.level === "error");
   const warns = issues.filter((i) => i.level === "warn");
 
-  const periods = periodsOf(data.slots);
   const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
 
   /** ── 운영 구간 필터 ─────────────────────────────── */
@@ -91,7 +95,7 @@ export default function ResultPanel({ data, set }: Props) {
     const all = data.days.map((_, i) => i);
     if (!segment) return all;
     const picked = segment.days.filter((d) => d >= 0 && d < data.days.length);
-    return picked.length > 0 ? picked : all;
+    return picked;
   }, [segment, data.days]);
   const dayLabels = viewDays.map((i) => data.days[i]);
   const segSuffix = segment ? ` (${segment.name || "구간"})` : "";
@@ -104,10 +108,12 @@ export default function ResultPanel({ data, set }: Props) {
 
   /** ── 자동 배치 ──────────────────────────────────── */
   const run = (seed: number) => {
-    if (data.timetable.length > 0 && !confirm("지금 구성된 시간표를 지우고 새로 배치합니다. 계속할까요?"))
+    const ids = new Set(solveData.classes.map((c) => c.id));
+    const label = data.segments.find((s) => s.id === solveSegmentId)?.name || "전체";
+    if (data.timetable.some((a) => ids.has(a.classId)) && !confirm(`${label} 시간표를 새로 배치합니다. 선택한 구간 밖의 시간표는 유지됩니다. 계속할까요?`))
       return;
     workerRef.current?.terminate();
-    const req = buildSolveRequest(data, { timeLimitMs: limitMs, seed });
+    const req = buildSolveRequest(solveData, { timeLimitMs: limitMs, seed, reserved: data.timetable.filter((a) => !ids.has(a.classId)) });
     const lectures = req.lectures;
 
     const worker = new Worker(new URL("../solver.worker.ts", import.meta.url), { type: "module" });
@@ -116,6 +122,12 @@ export default function ResultPanel({ data, set }: Props) {
     setProgress("배치 중…");
     setSolveInfo(null);
     setSelectedId(null);
+    worker.onerror = () => {
+      setRunning(false);
+      setProgress("배치 중 오류가 발생했습니다. 기존 시간표는 유지됩니다.");
+      worker.terminate();
+      workerRef.current = null;
+    };
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
       const msg = e.data;
       if (msg.type === "progress") {
@@ -124,8 +136,15 @@ export default function ResultPanel({ data, set }: Props) {
         );
         return;
       }
-      setSolveInfo({ result: msg, lectures });
-      set((d) => ({ ...d, timetable: fromSolveResult(msg, lectures) }));
+      if (latestData.current !== data) {
+        alert("배치 중 입력이나 시간표가 변경되어 결과를 적용하지 않았습니다. 다시 실행하세요.");
+      } else {
+        setSolveInfo({ result: msg, lectures });
+        const merged = mergeSolved(data, req.classIds, fromSolveResult(msg, lectures));
+        const errors = conflictsOf(merged, merged.timetable);
+        if (errors.length) alert(`보존한 시간표와 충돌해 적용하지 않았습니다.\n${errors.map((c) => c.text).join("\n")}`);
+        else if (msg.ok || !data.timetable.some((a) => ids.has(a.classId)) || confirm("일부 수업이 미배치되었습니다. 기존 구간 시간표를 이 부분 결과로 바꿀까요?")) set(() => merged);
+      }
       setRunning(false);
       setProgress("");
       worker.terminate();
@@ -146,7 +165,7 @@ export default function ResultPanel({ data, set }: Props) {
     set((d) => ({ ...d, timetable: fn(d.timetable) }));
 
   const addAt = (ownerId: string, axis: Axis, day: number, period: number) => {
-    const classId = axis === "class" ? ownerId : (data.classes[0]?.id ?? "");
+    const classId = axis === "class" ? ownerId : (data.classes.find((c) => dayAllowedFor(data, c.id, day))?.id ?? "");
     if (!classId) {
       alert("먼저 [체험반·체험존] 탭에서 체험반을 만드세요.");
       return;
@@ -181,6 +200,11 @@ export default function ResultPanel({ data, set }: Props) {
     );
 
     if (target) {
+      if (blockedBy(data, target.day, target.period, moving.length) || blockedBy(data, moving.day, moving.period, target.length) ||
+          !dayAllowedFor(data, moving.classId, target.day) || !dayAllowedFor(data, target.classId, moving.day)) {
+        alert("고정 활동 또는 운영 구간을 벗어나 두 수업을 맞바꿀 수 없습니다.");
+        return;
+      }
       if (
         !fits(data, target.day, target.period, moving.length) ||
         !fits(data, moving.day, moving.period, target.length)
@@ -268,6 +292,7 @@ export default function ResultPanel({ data, set }: Props) {
       title: titleOf(t.name),
       days: dayLabels,
       slots: data.slots,
+      daySlots: data.daySlots,
       grid: gridOf(t.id, kind),
     });
 
@@ -296,6 +321,11 @@ export default function ResultPanel({ data, set }: Props) {
         desc="모든 계산은 브라우저 안에서 일어납니다. 서버로 보내는 데이터는 없습니다."
       >
         <div className="no-print flex flex-wrap items-center gap-3">
+          <select aria-label="자동 생성할 구간" value={solveSegmentId} disabled={running}
+            onChange={(e) => setSolveSegmentId(e.target.value)} className="rounded-lg border border-tt-300 bg-white px-2.5 py-1.5 text-sm">
+            <option value="">전체 구간</option>
+            {data.segments.map((s) => <option key={s.id} value={s.id}>{s.name || "이름 없는 구간"}만 생성</option>)}
+          </select>
           <select
             value={limitMs}
             onChange={(e) => setLimitMs(Number(e.target.value))}
@@ -335,8 +365,8 @@ export default function ResultPanel({ data, set }: Props) {
 
         {data.segments.length > 0 && (
           <p className="mt-3 text-sm text-tt-600">
-            운영 구간 {data.segments.length}개가 있습니다. 한 번에 함께 풀고, 각 반은 자기 구간의 요일에만
-            들어갑니다 — 강사·체험존이 구간을 넘어 겹치는 일도 함께 막습니다.
+            구간을 선택하면 그 구간의 반만 새로 배치하고 나머지 시간표는 유지합니다.
+            보존한 시간표의 강사·체험존 사용 시간도 피하며, 결과는 자동으로 통합됩니다.
           </p>
         )}
 
@@ -485,7 +515,13 @@ export default function ResultPanel({ data, set }: Props) {
             <AssignmentEditor
               data={data}
               value={selected}
-              onChange={(next) => putTimetable((list) => sortAssignments(upsert(list, next)))}
+              onChange={(next) => {
+                if (blockedBy(data, next.day, next.period, next.length) || !dayAllowedFor(data, next.classId, next.day)) {
+                  alert("고정 활동 또는 운영 구간 밖에는 수업을 넣을 수 없습니다.");
+                  return;
+                }
+                putTimetable((list) => sortAssignments(upsert(list, next)));
+              }}
               onDelete={() => {
                 putTimetable((list) => removeAssignment(list, selected.id));
                 setSelectedId(null);
@@ -568,7 +604,7 @@ export default function ResultPanel({ data, set }: Props) {
             const g = gridOf(x.id, view);
             const used = usedCells(g);
             const name = x.name || "(이름없음)";
-            const capacity = periods.length * viewDays.length;
+            const capacity = capacityForDays(data, viewDays, view === "class" ? x.id : undefined);
             return (
               <Timetable
                 key={x.id}
@@ -582,6 +618,7 @@ export default function ResultPanel({ data, set }: Props) {
                 }
                 days={dayLabels}
                 slots={data.slots}
+                daySlots={data.daySlots}
                 grid={g}
                 edit={hooksFor(x.id, view)}
               />

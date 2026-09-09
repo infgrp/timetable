@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AppData } from "../types";
-import { allowedDaysOf, periodsOf } from "../store";
+import { allowedDaysOf, capacityForDays } from "../store";
 import { buildGrids, sliceGrid, usedCells } from "../assignments";
 import { toSheet } from "../timetableSheet";
 import { buildXlsx } from "../xlsx";
@@ -23,7 +23,6 @@ export default function ViewerPanel({ data, onBuild }: Props) {
   const [pickedId, setPickedId] = useState<string>("");
   const [segId, setSegId] = useState("");
 
-  const periods = periodsOf(data.slots);
   const grids = useMemo(() => buildGrids(data, data.timetable), [data]);
 
   const segment = data.segments.find((s) => s.id === segId) ?? null;
@@ -31,7 +30,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
     const all = data.days.map((_, i) => i);
     if (!segment) return all;
     const picked = segment.days.filter((d) => d >= 0 && d < data.days.length);
-    return picked.length > 0 ? picked : all;
+    return picked;
   }, [segment, data.days]);
   const dayLabels = viewDays.map((i) => data.days[i]);
   const segSuffix = segment ? ` (${segment.name || "구간"})` : "";
@@ -57,7 +56,8 @@ export default function ViewerPanel({ data, onBuild }: Props) {
   const titleFor = (name: string) =>
     `${axis === "teacher" ? `${name} 강사` : `${head}${name}`}${segSuffix}`;
 
-  const shown = pickedId ? targets.filter((t) => t.id === pickedId) : targets;
+  const activePickedId = targets.some((t) => t.id === pickedId) ? pickedId : "";
+  const shown = activePickedId ? targets.filter((t) => t.id === activePickedId) : targets;
 
   const download = () => {
     if (shown.length === 0) return;
@@ -70,10 +70,11 @@ export default function ViewerPanel({ data, onBuild }: Props) {
         title: `${head}${axis === "teacher" ? `${t.name} 강사` : t.name} 시간표${segSuffix}`,
         days: dayLabels,
         slots: data.slots,
+        daySlots: data.daySlots,
         grid: gridOf(t.id),
       });
     });
-    const label = pickedId ? shown[0].name : `${AXIS_LABEL[axis]}별`;
+    const label = activePickedId ? shown[0].name : `${AXIS_LABEL[axis]}별`;
     downloadBlob(`${safeFileName(`${data.schoolName || "시간표"} ${label}${segSuffix}`)}.xlsx`, buildXlsx(sheets));
   };
 
@@ -117,11 +118,11 @@ export default function ViewerPanel({ data, onBuild }: Props) {
           {data.segments.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-tt-700">구간</span>
-              <Button variant={segId === "" ? "primary" : "ghost"} onClick={() => setSegId("")}>
+              <Button variant={segId === "" ? "primary" : "ghost"} onClick={() => { setSegId(""); setPickedId(""); }}>
                 전체 ({data.days.join("")})
               </Button>
               {data.segments.map((s) => (
-                <Button key={s.id} variant={segId === s.id ? "primary" : "ghost"} onClick={() => setSegId(s.id)}>
+                <Button key={s.id} variant={segId === s.id ? "primary" : "ghost"} onClick={() => { setSegId(s.id); setPickedId(""); }}>
                   {s.name || "(이름없음)"}
                 </Button>
               ))}
@@ -134,7 +135,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
               type="button"
               onClick={() => setPickedId("")}
               className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                pickedId === ""
+                activePickedId === ""
                   ? "border-tt-600 bg-tt-600 text-white"
                   : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
               }`}
@@ -147,7 +148,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
                 type="button"
                 onClick={() => setPickedId(t.id)}
                 className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                  pickedId === t.id
+                  activePickedId === t.id
                     ? "border-tt-600 bg-tt-600 text-white"
                     : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
                 }`}
@@ -166,14 +167,16 @@ export default function ViewerPanel({ data, onBuild }: Props) {
         )}
       </Card>
 
-      {targets.length === 0 ? (
+      {viewDays.length === 0 ? (
+        <Empty>이 구간의 운영 요일이 없습니다. [시간표 구성하기]에서 요일을 지정하세요.</Empty>
+      ) : targets.length === 0 ? (
         <Empty>이 구간에 해당하는 {AXIS_LABEL[axis]}이(가) 없습니다.</Empty>
       ) : (
-        <div className={`grid gap-5 ${pickedId ? "" : "xl:grid-cols-2"}`}>
+        <div className={`grid gap-5 ${activePickedId ? "" : "xl:grid-cols-2"}`}>
           {shown.map((t) => {
             const g = gridOf(t.id);
             const used = usedCells(g);
-            const capacity = periods.length * viewDays.length;
+            const capacity = capacityForDays(data, viewDays, axis === "class" ? t.id : undefined);
             return (
               <Timetable
                 key={t.id}
@@ -185,6 +188,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
                 }
                 days={dayLabels}
                 slots={data.slots}
+                daySlots={data.daySlots}
                 grid={g}
               />
             );

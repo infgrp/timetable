@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppData } from "../types";
-import { newFixedActivity, periodsOf, slotKey } from "../store";
+import { newFixedActivity, slotKey } from "../store";
 import { Button, Card, Empty, TextInput } from "./ui";
+import { calendarPeriods, dayPeriods } from "../calendar";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
@@ -29,7 +30,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
     return () => window.removeEventListener("pointerup", stop);
   }, []);
 
-  const periods = periodsOf(data.slots);
+  const periods = calendarPeriods(data);
   const activity = data.fixedActivities.find((f) => f.id === selected) ?? null;
 
   const patch = (id: string, cells: string[]) =>
@@ -53,6 +54,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
 
   const toggleMany = (keys: string[]) => {
     if (!activity) return;
+    keys = keys.filter((key) => !takenElsewhere.has(key));
     const allOn = keys.every((k) => activity.cells.includes(k));
     const next = new Set(activity.cells);
     for (const k of keys) {
@@ -74,7 +76,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
   return (
     <Card
       title={`요일별 고정 활동 (${data.fixedActivities.length}개)`}
-      desc="Orientation·Closing 처럼 요일마다 자리가 정해진 활동입니다. 여기에 칠한 칸에는 어떤 프로그램도 들어가지 않고, 모든 체험반과 강사의 시간표에 똑같이 나타납니다."
+      desc="Orientation·Closing처럼 요일마다 자리가 정해진 활동입니다. 칠한 칸에는 프로그램이 배치되지 않으며, 그날 등원하는 체험반과 강사의 시간표에 나타납니다."
     >
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {unusedPresets.map((n) => (
@@ -163,7 +165,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
                         <th
                           key={day}
                           className="min-w-20 cursor-pointer border border-tt-200 bg-tt-100 px-3 py-1.5 text-sm font-bold text-tt-800 hover:bg-tt-200"
-                          onClick={() => toggleMany(periods.map((_, pi) => slotKey(di, pi)))}
+                          onClick={() => toggleMany(dayPeriods(data, di).map((_, pi) => slotKey(di, pi)))}
                           title="이 요일 전체 토글"
                         >
                           {day}
@@ -176,7 +178,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
                       <tr key={p.id}>
                         <th
                           className="cursor-pointer border border-tt-200 bg-tt-50 px-2 py-1 text-left text-xs font-semibold text-tt-700 hover:bg-tt-100"
-                          onClick={() => toggleMany(data.days.map((_, di) => slotKey(di, pi)))}
+                          onClick={() => toggleMany(data.days.flatMap((_, di) => dayPeriods(data, di)[pi] ? [slotKey(di, pi)] : []))}
                           title="이 교시 전체 토글"
                         >
                           {p.label}
@@ -185,7 +187,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
                         {data.days.map((day, di) => {
                           const key = slotKey(di, pi);
                           const on = activity.cells.includes(key);
-                          const other = takenElsewhere.get(key);
+                          const other = !dayPeriods(data, di)[pi] ? "운영 없음" : takenElsewhere.get(key);
                           return (
                             <td
                               key={day}
