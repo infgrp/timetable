@@ -10,6 +10,8 @@ export type Cell = {
   id?: string;
   /** 충돌에 얽힌 칸 */
   bad?: boolean;
+  /** 고정 활동(Orientation·Closing) — 수업이 아니라 자리를 막는 칸 */
+  fixed?: boolean;
 };
 /** grid[periodIndex][dayIndex] — "cont" 는 위 칸이 이어지는 자리 */
 export type Grid = (Cell | "cont" | null)[][];
@@ -125,6 +127,18 @@ export default function Timetable({
                           }`}
                         >
                           {edit ? <span className="no-print text-lg leading-none">+</span> : null}
+                        </td>
+                      );
+
+                    // 고정 활동은 옮기거나 고칠 수 없다. 점심시간 띠와 같은 색으로 둔다.
+                    if (cell.fixed)
+                      return (
+                        <td
+                          key={day}
+                          rowSpan={cell.span}
+                          className="h-12 border border-tt-200 bg-amber-50 px-1 py-1 text-center align-middle text-[12px] font-semibold text-amber-700"
+                        >
+                          {cell.top}
                         </td>
                       );
 

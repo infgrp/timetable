@@ -97,19 +97,42 @@ export function solve(
   for (let u = 0; u < U; u++) classUnits[unitClass[u]].push(u);
 
   // ── 길이별로 시작 가능한 슬롯 목록 ──
-  const starts: Int32Array[] = [];
-  for (const len of [1, 2]) {
-    const list: number[] = [];
-    for (let d = 0; d < D; d++) {
-      for (let p = 0; p + len <= P; p++) {
-        if (len === 2 && !req.blockable[p]) continue;
-        list.push(d * P + p);
+  //
+  // 학급마다 다르다. 고정 활동(Orientation·Closing)이 막은 칸은 누구도 못 쓰고,
+  // 운영 구간이 정해진 반은 자기 구간의 요일에만 들어간다.
+  const blockedCell = new Uint8Array(S);
+  for (let s = 0; s < S; s++) if (req.blockedCells?.[s]) blockedCell[s] = 1;
+
+  const dayAllowed = (ci: number, d: number) => req.classAllowedDays?.[ci]?.[d] !== false;
+
+  /** classStarts[classIdx][len-1] */
+  const classStarts: Int32Array[][] = [];
+  const classValid = [new Uint8Array(C * S), new Uint8Array(C * S)];
+  for (let ci = 0; ci < C; ci++) {
+    const perLen: Int32Array[] = [];
+    for (const len of [1, 2]) {
+      const list: number[] = [];
+      for (let d = 0; d < D; d++) {
+        if (!dayAllowed(ci, d)) continue;
+        for (let p = 0; p + len <= P; p++) {
+          if (len === 2 && !req.blockable[p]) continue;
+          let free = true;
+          for (let k = 0; k < len; k++)
+            if (blockedCell[d * P + p + k]) {
+              free = false;
+              break;
+            }
+          if (!free) continue;
+          list.push(d * P + p);
+        }
       }
+      perLen.push(new Int32Array(list));
+      for (const s of list) classValid[len - 1][ci * S + s] = 1;
     }
-    starts.push(new Int32Array(list));
+    classStarts.push(perLen);
   }
-  const validStart = [new Uint8Array(S), new Uint8Array(S)];
-  for (let i = 0; i < 2; i++) for (const s of starts[i]) validStart[i][s] = 1;
+
+  const startsFor = (u: number): Int32Array => classStarts[unitClass[u]][unitLen[u] - 1];
 
   // ── 상태 ──
   const cellOwner = new Int32Array(C * S).fill(-1);
@@ -190,7 +213,7 @@ export function solve(
   const placeBest = (v: number, prefer: number): number => {
     const len = unitLen[v];
     const c = unitClass[v];
-    const list = starts[len - 1];
+    const list = classStarts[c][len - 1];
     let bestS = -1;
     let bestC = Number.MAX_SAFE_INTEGER;
     const tryAt = (s: number) => {
@@ -203,7 +226,7 @@ export function solve(
         bestS = s;
       }
     };
-    if (prefer >= 0 && validStart[len - 1][prefer]) tryAt(prefer);
+    if (prefer >= 0 && classValid[len - 1][c * S + prefer]) tryAt(prefer);
     const n = list.length;
     if (n > 0) {
       const off = (rnd() * n) | 0;
@@ -232,7 +255,7 @@ export function solve(
       for (const u of list) {
         const len = unitLen[u];
         const li = unitLec[u];
-        const cand = starts[len - 1];
+        const cand = classStarts[c][len - 1];
         let chosen = -1;
         let fallback = -1;
         const off = (rnd() * cand.length) | 0;
@@ -336,7 +359,7 @@ export function solve(
   const kick = (n: number) => {
     for (let i = 0; i < n; i++) {
       const u = (rnd() * U) | 0;
-      const list = starts[unitLen[u] - 1];
+      const list = startsFor(u);
       if (list.length === 0) continue;
       doMove(u, list[(rnd() * list.length) | 0]);
     }
@@ -373,7 +396,7 @@ export function solve(
       }
     }
 
-    const list = starts[unitLen[u] - 1];
+    const list = startsFor(u);
     if (list.length === 0) {
       sinceImprove++;
       continue;
@@ -480,7 +503,7 @@ export function solve(
       const t = unitTeacher[u];
       const c = unitClass[u];
       const r = unitRoom[u];
-      const list = starts[len - 1];
+      const list = classStarts[c][len - 1];
       for (let i = 0; i < list.length; i++) {
         const s = list[i];
         if (lecDay[li * D + ((s / P) | 0)] > 0) {

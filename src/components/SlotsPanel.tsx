@@ -3,6 +3,7 @@ import type { AppData, DaySlot } from "../types";
 import { ALL_DAYS, DEFAULT_GEN, generateSlots, periodsOf, uid } from "../store";
 import type { SlotGenOptions } from "../store";
 import { Button, Card, Field, Select, TextInput } from "./ui";
+import FixedActivitiesCard from "./FixedActivitiesCard";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
@@ -224,6 +225,8 @@ export default function SlotsPanel({ data, set }: Props) {
           </table>
         </div>
       </Card>
+
+      <FixedActivitiesCard data={data} set={set} />
     </div>
   );
 }

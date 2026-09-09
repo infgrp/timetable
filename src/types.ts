@@ -21,6 +21,37 @@ export type DaySlot = {
 export type Klass = {
   id: string;
   name: string;
+  /**
+   * 소속 운영 구간. null·undefined 면 모든 운영 요일에 올 수 있다.
+   * 월·화에 오는 학년과 수·목·금에 오는 학년이 다를 때 나눈다.
+   */
+  segmentId?: string | null;
+};
+
+/**
+ * 운영 구간 — 요일 묶음 하나.
+ * "월·화 (3학년)", "수·목·금 (4학년)" 처럼 서로 다른 팀이 다른 요일에 오는 운영을 담는다.
+ * 배치는 한 번에 풀되 각 체험반은 자기 구간의 요일에만 들어간다.
+ */
+export type Segment = {
+  id: string;
+  name: string;
+  /** days 의 index 목록 */
+  days: number[];
+};
+
+/**
+ * 요일별 고정 활동 — 월·수 1교시 Orientation, 화·금 6교시 Closing 처럼
+ * 수업이 아니지만 자리를 차지하는 칸.
+ *
+ * 점심시간은 하루 구성 전체에 걸치는 시간 띠(DaySlot.kind === "break")로 다루고,
+ * 이쪽은 "특정 요일의 특정 교시"만 막는다.
+ */
+export type FixedActivity = {
+  id: string;
+  name: string;
+  /** `${dayIndex}:${periodIndex}` 키 목록. 강사 회피 시간과 같은 형식이다. */
+  cells: string[];
 };
 
 export type Room = {
@@ -53,6 +84,11 @@ export type Course = {
   blocks: number;
   /** 전용 특별실 (없으면 null) */
   roomId: string | null;
+  /**
+   * 체험반·체험존 시간표에 강사 이름을 적지 않는다.
+   * 담당이 매주 바뀌는 수업(어드벤처 등)에 쓴다 — 강사 개인 시간표에는 그대로 나온다.
+   */
+  hideTeacher?: boolean;
 };
 
 /**
@@ -72,6 +108,8 @@ export type Assignment = {
   /** break 를 제외한 수업 교시만 센 시작 index */
   period: number;
   length: 1 | 2;
+  /** 체험반·체험존 시간표에서 강사 이름을 감춘다 (Course.hideTeacher 를 물려받는다) */
+  hideTeacher?: boolean;
 };
 
 /** 로테이션 한 바퀴를 도는 강사 묶음. 목록의 순서가 곧 도는 순서다. */
@@ -81,28 +119,42 @@ export type RotationGroup = {
   teacherIds: string[];
 };
 
-/** 회차 하나(9월·10월…). step 만큼 밀어서 담당을 바꾼다. */
-export type RotationRound = {
+/** 로테이션을 실제로 한 번 돌린 기록 */
+export type RotationTurn = {
   id: string;
-  name: string;
-  step: number;
+  /** ISO 날짜시각 */
+  at: string;
+  /** 돌린 뒤의 누적 칸 수 */
+  turns: number;
+  /** "10월부터" 같은 메모 */
+  note: string;
 };
 
+/**
+ * 로테이션은 규칙만 정해 두고, 돌리는 시기는 사람이 정한다.
+ * [다음으로 돌리기]를 누른 그 순간 timetable 의 강사가 실제로 바뀌고 기록이 남는다.
+ */
 export type RotationConfig = {
   groups: RotationGroup[];
-  rounds: RotationRound[];
+  /** 지금까지 몇 칸 돌렸는지 */
+  turns: number;
+  log: RotationTurn[];
 };
 
 export type AppData = {
-  version: 2;
+  version: 3;
   schoolName: string;
   days: string[];
   slots: DaySlot[];
+  /** 요일별 고정 활동 (Orientation·Closing 등) */
+  fixedActivities: FixedActivity[];
+  /** 운영 구간 (월·화 / 수·목·금). 비어 있으면 모든 반이 모든 요일에 온다. */
+  segments: Segment[];
   classes: Klass[];
   rooms: Room[];
   teachers: Teacher[];
   courses: Course[];
-  /** 현재 구성된 시간표(기준안). 로테이션은 여기에 강사만 갈아끼워 파생시킨다. */
+  /** 현재 구성된 시간표. 로테이션을 돌리면 여기의 강사가 바뀐다. */
   timetable: Assignment[];
   rotation: RotationConfig;
 };
@@ -118,6 +170,7 @@ export type Lecture = {
   roomId: string | null;
   hours: number;
   blocks: number;
+  hideTeacher?: boolean;
 };
 
 export type SolveRequest = {
@@ -131,6 +184,10 @@ export type SolveRequest = {
   roomIds: string[];
   /** teacherBlocked[teacherIdx][day * periodCount + period] */
   teacherBlocked: boolean[][];
+  /** 고정 활동이 차지해 아무 수업도 넣을 수 없는 칸. [day * periodCount + period] */
+  blockedCells: boolean[];
+  /** classAllowedDays[classIdx][day] — 운영 구간 밖의 요일은 false */
+  classAllowedDays: boolean[][];
   timeLimitMs: number;
   seed: number;
 };

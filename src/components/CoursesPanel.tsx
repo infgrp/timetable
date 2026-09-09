@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AppData, Course } from "../types";
-import { buildLectures, emptyCourse, periodsOf, roomLoads } from "../store";
+import { buildLectures, classCapacity, emptyCourse, roomLoads, weekCapacity } from "../store";
 import { Button, Card, Empty, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -8,7 +8,7 @@ type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 export default function CoursesPanel({ data, set }: Props) {
   const [openRow, setOpenRow] = useState<string | null>(null);
 
-  const capacity = periodsOf(data.slots).length * data.days.length;
+  const capacity = weekCapacity(data);
   const className = useMemo(() => new Map(data.classes.map((c) => [c.id, c.name])), [data.classes]);
 
   const totals = useMemo(() => {
@@ -63,6 +63,7 @@ export default function CoursesPanel({ data, set }: Props) {
                   <th className="w-24 py-2">주당 시수</th>
                   <th className="w-24 py-2">연속 2교시</th>
                   <th className="w-44 py-2">체험존</th>
+                  <th className="w-24 py-2" title="체험반 시간표에 강사 이름을 적을지">강사 표기</th>
                   <th className="w-24 py-2" />
                 </tr>
               </thead>
@@ -176,6 +177,16 @@ export default function CoursesPanel({ data, set }: Props) {
                           ))}
                         </Select>
                       </td>
+                      <td className="py-1.5 pr-2">
+                        <label className="flex cursor-pointer items-center gap-1.5 pt-2 text-xs font-semibold text-tt-600">
+                          <input
+                            type="checkbox"
+                            checked={!c.hideTeacher}
+                            onChange={(e) => patch(c.id, { hideTeacher: !e.target.checked })}
+                          />
+                          {c.hideTeacher ? "숨김" : "표기"}
+                        </label>
+                      </td>
                       <td className="py-1.5">
                         <div className="flex gap-1">
                           <Button onClick={() => duplicate(c)} title="복제">
@@ -202,15 +213,17 @@ export default function CoursesPanel({ data, set }: Props) {
       </Card>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        <Card title="체험반별 총 시수" desc={`주당 운영 칸 ${capacity}칸`}>
+        <Card title="체험반별 총 시수" desc="그 반이 오는 요일과 고정 활동을 뺀 실제 칸 수와 견줍니다">
           <div className="flex flex-wrap gap-2">
             {data.classes.map((k) => {
               const h = totals.byClass.get(k.id) ?? 0;
+              // 반마다 오는 요일이 다를 수 있으므로 그 반이 실제로 쓸 수 있는 칸과 견준다.
+              const room = classCapacity(data, k);
               const tone =
-                h > capacity ? "bg-red-100 text-red-700" : h === capacity ? "bg-emerald-100 text-emerald-700" : "bg-tt-100 text-tt-700";
+                h > room ? "bg-red-100 text-red-700" : h === room ? "bg-emerald-100 text-emerald-700" : "bg-tt-100 text-tt-700";
               return (
                 <span key={k.id} className={`rounded-lg px-2.5 py-1 text-xs font-semibold ${tone}`}>
-                  {k.name || "(이름없음)"} {h}/{capacity}
+                  {k.name || "(이름없음)"} {h}/{room}
                 </span>
               );
             })}

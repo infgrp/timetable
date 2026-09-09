@@ -1,15 +1,27 @@
-import type { AppData } from "./types";
+import type { AppData, Klass } from "./types";
 import { DEFAULT_GEN, generateSlots, uid } from "./store";
 
 /**
- * 상주형 영어체험센터 예시 — 6개 캠프반이 주 5일 동안 체험존을 돌아가며 쓴다.
- * 처음 열었을 때 구조를 눈으로 확인하고, 자기 센터에 맞게 고쳐 쓰라고 넣어 둔 것.
+ * 영어체험센터 예시 — 새로 들어온 기능이 한눈에 보이도록 짰다.
+ *
+ *   운영 구간   월·화에는 3학년 3반, 수·목·금에는 4학년 3반이 온다.
+ *   고정 활동   월·수 1교시 Orientation, 화·금 6교시 Closing.
+ *   강사 숨김   Adventure 는 매주 담당이 바뀌므로 체험반 시간표에 강사를 적지 않는다.
+ *   로테이션    존을 맡은 원어민 6명이 한 조로 돈다.
  */
 export function sampleData(): AppData {
-  const classes = ["A", "B", "C", "D", "E", "F"].map((n) => ({ id: uid("k"), name: `${n}반` }));
-  const classIds = classes.map((c) => c.id);
-  const firstHalf = classIds.slice(0, 3);
-  const secondHalf = classIds.slice(3);
+  const days = ["월", "화", "수", "목", "금"];
+
+  const segEarly = { id: uid("sg"), name: "월·화 (3학년)", days: [0, 1] };
+  const segLate = { id: uid("sg"), name: "수·목·금 (4학년)", days: [2, 3, 4] };
+
+  const classes: Klass[] = [
+    ...["A", "B", "C"].map((n) => ({ id: uid("k"), name: `${n}반`, segmentId: segEarly.id })),
+    ...["D", "E", "F"].map((n) => ({ id: uid("k"), name: `${n}반`, segmentId: segLate.id })),
+  ];
+  const earlyIds = classes.filter((c) => c.segmentId === segEarly.id).map((c) => c.id);
+  const lateIds = classes.filter((c) => c.segmentId === segLate.id).map((c) => c.id);
+  const allIds = classes.map((c) => c.id);
 
   const rooms = [
     "공항·출입국존",
@@ -21,20 +33,20 @@ export function sampleData(): AppData {
   ].map((name) => ({ id: uid("r"), name }));
   const zone = (name: string) => rooms.find((r) => r.name === name)!.id;
 
-  // [강사, 프로그램, 담당 체험반, 반당 주당 시수, 연속 2교시 횟수, 체험존]
-  const spec: [string, string, string[], number, number, string | null][] = [
-    ["Emma Clark", "Airport & Immigration", classIds, 2, 1, zone("공항·출입국존")],
-    ["Jack Miller", "Restaurant & Ordering", classIds, 2, 1, zone("레스토랑존")],
-    ["Olivia Brown", "Shopping & Money", classIds, 2, 1, zone("마트·쇼핑존")],
-    ["Liam Davis", "Clinic & Health", classIds, 2, 1, zone("병원·클리닉존")],
-    ["Sophia Wilson", "Media Studio", classIds, 2, 1, zone("미디어 스튜디오")],
-    ["박세계", "World Culture", classIds, 2, 1, zone("컬처룸")],
-    ["김지영", "Homeroom English", firstHalf, 6, 1, null],
-    ["이수민", "Homeroom English", secondHalf, 6, 1, null],
-    ["최윤아", "Phonics & Reading", classIds, 4, 0, null],
-    ["정하늘", "Song & Chant", classIds, 3, 0, null],
-    ["한도윤", "Project Time", classIds, 4, 2, null],
-    ["Emma Clark", "Free Talking", classIds, 1, 0, null],
+  // [강사, 프로그램, 담당 체험반, 반당 주당 시수, 연속 2교시 횟수, 체험존, 강사 숨김]
+  const spec: [string, string, string[], number, number, string | null, boolean][] = [
+    ["Emma Clark", "Airport & Immigration", allIds, 1, 0, zone("공항·출입국존"), false],
+    ["Jack Miller", "Restaurant & Ordering", allIds, 1, 0, zone("레스토랑존"), false],
+    ["Olivia Brown", "Shopping & Money", allIds, 1, 0, zone("마트·쇼핑존"), false],
+    ["Liam Davis", "Clinic & Health", allIds, 1, 0, zone("병원·클리닉존"), false],
+    ["Sophia Wilson", "Media Studio", allIds, 1, 0, zone("미디어 스튜디오"), false],
+    ["박세계", "World Culture", allIds, 1, 0, zone("컬처룸"), false],
+    ["김지영", "Homeroom English", earlyIds, 2, 0, null, false],
+    ["한도윤", "Project Time", earlyIds, 2, 1, null, false],
+    ["이수민", "Homeroom English", lateIds, 4, 1, null, false],
+    ["최윤아", "Phonics & Reading", lateIds, 3, 0, null, false],
+    // 매주 담당이 바뀌는 수업 — 체험반 시간표에는 강사를 적지 않는다.
+    ["정하늘", "Adventure", lateIds, 3, 0, null, true],
   ];
 
   const teacherId = new Map<string, string>();
@@ -42,13 +54,11 @@ export function sampleData(): AppData {
 
   // 회피 시간 (요일 0=월, 교시 0=1교시)
   const avoid: Record<string, string[]> = {
-    "Sophia Wilson": ["4:4", "4:5"], // 금 5·6교시 장비 정비
-    박세계: ["2:0", "2:1", "2:2", "2:3", "2:4", "2:5"], // 수요일 타 기관 출강
-    최윤아: ["0:0"], // 월 1교시 운영회의
-    정하늘: ["1:5", "3:5"], // 화·목 6교시
+    "Sophia Wilson": ["4:4"], // 금 5교시 장비 정비
+    박세계: ["3:0", "3:1", "3:2"], // 목요일 오전 타 기관 출강
+    최윤아: ["2:1"], // 수 2교시 운영회의
   };
 
-  // 존을 맡은 원어민 여섯이 달마다 한 칸씩 존을 바꿔 도는 구조 (로테이션 예시)
   const rotationTeachers = [
     "Emma Clark",
     "Jack Miller",
@@ -59,10 +69,15 @@ export function sampleData(): AppData {
   ].map((name) => teacherId.get(name)!);
 
   return {
-    version: 2,
+    version: 3,
     schoolName: "○○영어체험센터",
-    days: ["월", "화", "수", "목", "금"],
+    days,
     slots: generateSlots(DEFAULT_GEN),
+    fixedActivities: [
+      { id: uid("f"), name: "Orientation", cells: ["0:0", "2:0"] },
+      { id: uid("f"), name: "Closing", cells: ["1:5", "4:5"] },
+    ],
+    segments: [segEarly, segLate],
     classes,
     rooms,
     teachers: [...teacherId.entries()].map(([name, id]) => ({
@@ -70,7 +85,7 @@ export function sampleData(): AppData {
       name,
       unavailable: avoid[name] ?? [],
     })),
-    courses: spec.map(([name, subject, ids, hours, blocks, roomId]) => ({
+    courses: spec.map(([name, subject, ids, hours, blocks, roomId, hideTeacher]) => ({
       id: uid("c"),
       teacherId: teacherId.get(name)!,
       subject,
@@ -78,15 +93,13 @@ export function sampleData(): AppData {
       hours,
       blocks,
       roomId,
+      hideTeacher: hideTeacher || undefined,
     })),
     timetable: [],
     rotation: {
       groups: [{ id: uid("g"), name: "존 담당 원어민", teacherIds: rotationTeachers }],
-      rounds: ["3월", "4월", "5월", "6월", "7월", "9월"].map((name, i) => ({
-        id: uid("r"),
-        name,
-        step: i,
-      })),
+      turns: 0,
+      log: [],
     },
   };
 }

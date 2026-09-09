@@ -6,13 +6,13 @@
 import { writeFileSync } from "node:fs";
 import { solve } from "../src/solver";
 import { sampleData } from "../src/sample";
-import { blockableFlags, buildLectures, periodsOf, roomLoads, validate } from "../src/store";
+import { buildSolveRequest, periodsOf, roomLoads, validate, weekCapacity } from "../src/store";
 import type { SolveRequest } from "../src/types";
 
 const data = sampleData();
 const periods = periodsOf(data.slots);
 const P = periods.length;
-const capacity = P * data.days.length;
+const capacity = weekCapacity(data);
 
 const out = "영어체험센터_예시.json";
 writeFileSync(out, JSON.stringify(data, null, 2), "utf8");
@@ -22,26 +22,11 @@ console.log(
 );
 for (const i of validate(data)) console.log(`  [${i.level}] ${i.text}`);
 
-const lectures = buildLectures(data);
-const req: SolveRequest = {
-  dayCount: data.days.length,
-  periodCount: P,
-  blockable: blockableFlags(data.slots),
-  lectures,
-  teacherIds: data.teachers.map((t) => t.id),
-  classIds: data.classes.map((c) => c.id),
-  roomIds: data.rooms.map((r) => r.id),
-  teacherBlocked: data.teachers.map((t) => {
-    const arr = new Array<boolean>(data.days.length * P).fill(false);
-    for (const key of t.unavailable) {
-      const [d, p] = key.split(":").map(Number);
-      if (d < data.days.length && p < P) arr[d * P + p] = true;
-    }
-    return arr;
-  }),
+const req: SolveRequest = buildSolveRequest(data, {
   timeLimitMs: Number(process.argv[2] ?? 10000),
   seed: 20260903,
-};
+});
+const lectures = req.lectures;
 
 const r = solve(req);
 console.log(`\n배치: ok=${r.ok} ${r.elapsedMs}ms 다시 시도 ${r.restarts}회`);

@@ -1,30 +1,10 @@
 import { solve } from "../src/solver";
 import { sampleData, } from "../src/sample";
-import { blockableFlags, buildLectures, periodsOf } from "../src/store";
+import { buildSolveRequest, periodsOf } from "../src/store";
 import type { SolveRequest } from "../src/types";
 
-function makeReq(data: ReturnType<typeof sampleData>, seed: number, ms: number): SolveRequest {
-  const P = periodsOf(data.slots).length;
-  return {
-    dayCount: data.days.length,
-    periodCount: P,
-    blockable: blockableFlags(data.slots),
-    lectures: buildLectures(data),
-    teacherIds: data.teachers.map((t) => t.id),
-    classIds: data.classes.map((c) => c.id),
-    roomIds: data.rooms.map((r) => r.id),
-    teacherBlocked: data.teachers.map((t) => {
-      const arr = new Array<boolean>(data.days.length * P).fill(false);
-      for (const key of t.unavailable) {
-        const [d, p] = key.split(":").map(Number);
-        if (d < data.days.length && p < P) arr[d * P + p] = true;
-      }
-      return arr;
-    }),
-    timeLimitMs: ms,
-    seed,
-  };
-}
+const makeReq = (data: ReturnType<typeof sampleData>, seed: number, ms: number): SolveRequest =>
+  buildSolveRequest(data, { timeLimitMs: ms, seed });
 
 const data = sampleData();
 const req = makeReq(data, 1, 15000);

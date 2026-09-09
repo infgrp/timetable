@@ -1,13 +1,26 @@
 import { useState } from "react";
 import type { AppData, RotationGroup } from "../types";
-import { monthRounds, newGroup, newRound, rotationPlan } from "../rotation";
+import {
+  canRotate,
+  cycleLength,
+  formatTurnDate,
+  newGroup,
+  newTurn,
+  rotateAssignments,
+  rotationPlan,
+} from "../rotation";
+import { buildGrids } from "../assignments";
+import { toSheet } from "../timetableSheet";
+import { buildXlsx } from "../xlsx";
+import type { XSheet } from "../xlsx";
+import { downloadBlob, safeFileName } from "../export";
 import { Button, Card, Empty, Field, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
 export default function RotationPanel({ data, set }: Props) {
-  const [startMonth, setStartMonth] = useState(3);
-  const { groups, rounds } = data.rotation;
+  const [note, setNote] = useState("");
+  const { groups, turns, log } = data.rotation;
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
 
   const setRotation = (fn: (r: AppData["rotation"]) => AppData["rotation"]) =>
@@ -24,17 +37,77 @@ export default function RotationPanel({ data, set }: Props) {
     return { ...g, teacherIds: next };
   };
 
-  const biggest = Math.max(0, ...groups.map((g) => g.teacherIds.length));
+  const cycle = cycleLength(groups);
+  const ready = canRotate(data.rotation);
+  const hasTimetable = data.timetable.length > 0;
+
+  /** 실제로 한 칸 돌린다 — 시간표의 강사가 그 자리에서 바뀌고 기록이 남는다. */
+  const rotateNow = () => {
+    if (!ready || !hasTimetable) return;
+    const label = note.trim() || "직접 돌림";
+    if (!confirm(`지금 시간표의 담당 강사를 한 칸 밉니다.\n(${label})\n계속할까요?`)) return;
+    set((d) => ({
+      ...d,
+      timetable: rotateAssignments(d.timetable, d.rotation.groups, 1),
+      rotation: {
+        ...d.rotation,
+        turns: d.rotation.turns + 1,
+        log: [newTurn(d.rotation.turns + 1, label), ...d.rotation.log].slice(0, 60),
+      },
+    }));
+    setNote("");
+  };
+
+  const undoLast = () => {
+    if (turns <= 0) return;
+    if (!confirm("마지막으로 돌린 것을 되돌립니다. 계속할까요?")) return;
+    set((d) => ({
+      ...d,
+      timetable: rotateAssignments(d.timetable, d.rotation.groups, -1),
+      rotation: {
+        ...d.rotation,
+        turns: Math.max(0, d.rotation.turns - 1),
+        log: d.rotation.log.slice(1),
+      },
+    }));
+  };
+
+  /** 앞으로 N번치를 미리 뽑아 나눠 줄 때 */
+  const downloadUpcoming = () => {
+    const n = Math.max(1, cycle || 1);
+    if (data.teachers.length === 0) return;
+    const head = data.schoolName ? data.schoolName + " " : "";
+    const sheets: XSheet[] = [];
+    for (let step = 0; step < n; step++) {
+      const list = rotateAssignments(data.timetable, groups, step);
+      const grids = buildGrids(data, list);
+      for (const t of data.teachers) {
+        const label = step === 0 ? "현재" : `${step}번 뒤`;
+        sheets.push(
+          toSheet({
+            sheetName: `${label} ${t.name || "강사"}`.slice(0, 31),
+            title: `${head}${t.name || "(이름없음)"} 강사 시간표 (${label})`,
+            days: data.days,
+            slots: data.slots,
+            grid: grids.byTeacher.get(t.id) ?? [],
+          }),
+        );
+      }
+    }
+    downloadBlob(
+      `${safeFileName(data.schoolName || "시간표")} 로테이션 ${n}회치 강사 시간표.xlsx`,
+      buildXlsx(sheets),
+    );
+  };
 
   return (
     <div className="flex flex-col gap-5">
       <Card
-        title="강사 로테이션"
+        title="로테이션 규칙"
         desc={
           <>
-            시간표(무엇을 언제 어디서)는 그대로 두고 회차마다 담당 강사만 한 칸씩 밉니다. 예를 들어 A·B·C
-            순서로 묶어 두면, 1회차에는 A가 B의 시간표를, B가 C의 시간표를, C가 A의 시간표를 맡습니다.
-            결과는 <b>[시간표]</b> 탭에서 회차를 골라 보고 그대로 내려받습니다.
+            시간표(무엇을 언제 어디서)는 그대로 두고 담당 강사만 한 칸씩 미는 방식입니다. 같이 도는 강사를{" "}
+            <b>순서대로</b> 묶어 두면, 한 번 돌릴 때마다 각자 <b>바로 다음 사람</b>의 시간표를 맡습니다.
           </>
         }
       >
@@ -42,10 +115,7 @@ export default function RotationPanel({ data, set }: Props) {
           <Button
             variant="primary"
             onClick={() =>
-              setRotation((r) => ({
-                ...r,
-                groups: [...r.groups, newGroup(`${r.groups.length + 1}조`, [])],
-              }))
+              setRotation((r) => ({ ...r, groups: [...r.groups, newGroup(`${r.groups.length + 1}조`, [])] }))
             }
           >
             + 로테이션 조 추가
@@ -91,7 +161,9 @@ export default function RotationPanel({ data, set }: Props) {
                   </div>
 
                   {g.teacherIds.length === 0 ? (
-                    <p className="py-2 text-sm text-tt-500">강사를 순서대로 넣으세요. 이 순서가 도는 순서입니다.</p>
+                    <p className="py-2 text-sm text-tt-500">
+                      강사를 순서대로 넣으세요. 이 순서가 도는 순서입니다.
+                    </p>
                   ) : (
                     <ol className="mb-2">
                       {g.teacherIds.map((id, i) => (
@@ -150,102 +222,77 @@ export default function RotationPanel({ data, set }: Props) {
       </Card>
 
       <Card
-        title={`회차 (${rounds.length}개)`}
-        desc="한 회차가 로테이션 한 칸입니다. 0회차는 지금 짜 둔 기준 시간표 그대로입니다."
+        title="돌리기"
+        desc="원하실 때 누르세요. 누른 그 순간 시간표의 담당 강사가 바뀌고 기록이 남습니다. 시간표의 자리와 프로그램은 건드리지 않습니다."
       >
         <div className="flex flex-wrap items-end gap-3">
-          <div className="w-28">
-            <Field label="시작 월">
+          <div className="w-60">
+            <Field label="메모" hint="예) 10월부터 · 2학기 2차">
               <TextInput
-                type="number"
-                min={1}
-                max={12}
-                value={startMonth}
-                onChange={(e) => setStartMonth(Number(e.target.value) || 1)}
+                value={note}
+                placeholder="언제부터인지 적어 두면 좋습니다"
+                onChange={(e) => setNote(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && ready && hasTimetable) rotateNow();
+                }}
               />
             </Field>
           </div>
           <Button
             variant="primary"
-            disabled={biggest < 2}
-            title={biggest < 2 ? "먼저 2명 이상인 로테이션 조를 만드세요" : undefined}
-            onClick={() => setRotation((r) => ({ ...r, rounds: monthRounds(startMonth, biggest) }))}
+            disabled={!ready || !hasTimetable}
+            title={
+              !ready
+                ? "2명 이상인 로테이션 조가 필요합니다"
+                : !hasTimetable
+                  ? "먼저 시간표를 만드세요"
+                  : undefined
+            }
+            onClick={rotateNow}
           >
-            {startMonth}월부터 {biggest || "?"}개월치 만들기
+            다음으로 돌리기
+          </Button>
+          <Button variant="danger" disabled={turns <= 0} onClick={undoLast}>
+            한 칸 되돌리기
           </Button>
           <Button
-            onClick={() =>
-              setRotation((r) => ({ ...r, rounds: [...r.rounds, newRound(`${r.rounds.length + 1}회차`, r.rounds.length)] }))
-            }
+            disabled={!ready || !hasTimetable || data.teachers.length === 0}
+            title="지금부터 한 바퀴치를 강사별 시트로"
+            onClick={downloadUpcoming}
           >
-            + 회차 하나 추가
+            앞으로 {cycle || "?"}번치 미리 받기
           </Button>
-          {rounds.length > 0 && (
-            <Button variant="danger" onClick={() => setRotation((r) => ({ ...r, rounds: [] }))}>
-              회차 모두 지우기
-            </Button>
-          )}
         </div>
 
-        {rounds.length > 0 && (
-          <ul className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {rounds.map((r) => (
-              <li key={r.id} className="flex items-center gap-2 rounded-lg border border-tt-200 p-2">
-                <TextInput
-                  value={r.name}
-                  placeholder="회차 이름"
-                  onChange={(e) =>
-                    setRotation((c) => ({
-                      ...c,
-                      rounds: c.rounds.map((x) => (x.id === r.id ? { ...x, name: e.target.value } : x)),
-                    }))
-                  }
-                />
-                <div className="w-24 shrink-0">
-                  <Select
-                    value={r.step}
-                    onChange={(e) =>
-                      setRotation((c) => ({
-                        ...c,
-                        rounds: c.rounds.map((x) =>
-                          x.id === r.id ? { ...x, step: Number(e.target.value) } : x,
-                        ),
-                      }))
-                    }
-                  >
-                    {Array.from({ length: Math.max(biggest, 1) }, (_, i) => (
-                      <option key={i} value={i}>
-                        {i}칸 이동
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <Button
-                  variant="danger"
-                  onClick={() =>
-                    setRotation((c) => ({ ...c, rounds: c.rounds.filter((x) => x.id !== r.id) }))
-                  }
-                >
-                  ×
-                </Button>
-              </li>
-            ))}
-          </ul>
+        <p className="mt-3 text-sm text-tt-600">
+          지금까지 <b className="text-tt-800">{turns}번</b> 돌렸습니다.
+          {cycle > 0 && (
+            <>
+              {" "}
+              한 바퀴는 {cycle}번이고, 지금은 <b className="text-tt-800">{(turns % cycle) + 1}번째 자리</b>입니다.
+            </>
+          )}
+        </p>
+
+        {!hasTimetable && (
+          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            아직 시간표가 없습니다. [시간표] 탭에서 먼저 만드세요. 규칙은 미리 정해 두셔도 됩니다.
+          </p>
         )}
       </Card>
 
-      {groups.some((g) => g.teacherIds.length >= 2) && rounds.length > 0 && (
-        <Card title="회차별 담당" desc="칸에 적힌 이름은 '누구의 기준 시간표를 맡는가'입니다.">
+      {ready && (
+        <Card title="돌리면 이렇게 됩니다" desc="한 번 돌린 뒤 각 강사가 맡게 될 시간표입니다.">
           <div className="flex flex-col gap-5">
             {groups
-              .filter((g) => g.teacherIds.length >= 2)
+              .filter((g) => g.teacherIds.filter(Boolean).length >= 2)
               .map((g) => (
                 <div key={g.id} className="overflow-x-auto">
                   <p className="mb-1 text-sm font-bold text-tt-700">{g.name || "(이름없는 조)"}</p>
                   <table className="border-collapse text-sm">
                     <thead>
                       <tr>
-                        <th className="border border-tt-200 bg-tt-50 px-2 py-1 text-xs text-tt-600">회차</th>
+                        <th className="border border-tt-200 bg-tt-50 px-2 py-1 text-xs text-tt-600">강사</th>
                         {g.teacherIds.map((id) => (
                           <th
                             key={id}
@@ -257,31 +304,38 @@ export default function RotationPanel({ data, set }: Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {rounds.map((r) => {
-                        const plan = rotationPlan(g, r.step);
-                        return (
-                          <tr key={r.id}>
-                            <th className="border border-tt-200 bg-tt-50 px-2 py-1 text-left text-xs font-semibold text-tt-700">
-                              {r.name}
-                            </th>
-                            {plan.map((p) => (
-                              <td
-                                key={p.teacherId}
-                                className={`border border-tt-200 px-3 py-1.5 text-center ${
-                                  p.sourceId === p.teacherId ? "bg-white text-tt-500" : "bg-tt-50 font-semibold text-tt-800"
-                                }`}
-                              >
-                                {teacherName.get(p.sourceId) ?? "?"} 시간표
-                              </td>
-                            ))}
-                          </tr>
-                        );
-                      })}
+                      <tr>
+                        <th className="border border-tt-200 bg-tt-50 px-2 py-1 text-left text-xs font-semibold text-tt-700">
+                          돌린 뒤 맡을 시간표
+                        </th>
+                        {rotationPlan(g, 1).map((p) => (
+                          <td
+                            key={p.teacherId}
+                            className="border border-tt-200 bg-tt-50 px-3 py-1.5 text-center font-semibold text-tt-800"
+                          >
+                            지금 {teacherName.get(p.sourceId) ?? "?"}의 자리
+                          </td>
+                        ))}
+                      </tr>
                     </tbody>
                   </table>
                 </div>
               ))}
           </div>
+        </Card>
+      )}
+
+      {log.length > 0 && (
+        <Card title={`돌린 기록 (${log.length}건)`} desc="가장 최근이 위입니다.">
+          <ul className="flex flex-col gap-1 text-sm">
+            {log.map((entry) => (
+              <li key={entry.id} className="flex flex-wrap items-baseline gap-2 border-b border-tt-100 py-1 last:border-0">
+                <span className="w-36 shrink-0 font-mono text-xs text-tt-500">{formatTurnDate(entry.at)}</span>
+                <span className="font-semibold text-tt-800">{entry.turns}번째</span>
+                <span className="text-tt-600">{entry.note}</span>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
     </div>
