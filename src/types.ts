@@ -101,11 +101,16 @@ export type Course = {
    */
   hideTeacher?: boolean;
   /**
-   * 같은 반에서 이 프로그램이 운영 구간 안에 여러 번 나와도 된다 (매일 하는 홈룸 영어 등).
-   * 기본(false)은 "구간당 1회" — 월·화반이면 월 또는 화 중 하루에 한 번만 배치된다.
-   * 구간이 없는 반은 언제나 "하루 1회"로만 본다.
+   * 같은 반에서 이 프로그램을 운영 구간 안에 딱 한 번만 넣는다.
+   * 기본(false)은 "하루 1회" — 하루에 한 번씩이면 같은 주에 여러 번 나와도 된다.
+   * 월·화반의 존 체험처럼 "그 방문 동안 한 번"이어야 하는 프로그램에만 켠다.
    */
-  repeatInSegment?: boolean;
+  oncePerSegment?: boolean;
+  /**
+   * 이 프로그램을 넣을 요일 (days 의 index). 비어 있거나 없으면 아무 요일에나 들어간다.
+   * Science 1 은 월요일, Science 2 는 화요일처럼 요일이 정해진 과목에 쓴다.
+   */
+  days?: number[];
 };
 
 /**
@@ -129,8 +134,8 @@ export type Assignment = {
   length: 1 | 2;
   /** 체험반·체험존 시간표에서 강사 이름을 감춘다 (Course.hideTeacher 를 물려받는다) */
   hideTeacher?: boolean;
-  /** 구간 안 반복 허용 (Course.repeatInSegment 를 물려받는다). 없으면 구간당 1회로 본다. */
-  repeatInSegment?: boolean;
+  /** 구간당 1회 (Course.oncePerSegment 를 물려받는다). 없으면 하루 1회로 본다. */
+  oncePerSegment?: boolean;
 };
 
 /** 로테이션 한 바퀴를 도는 강사 묶음. 목록의 순서가 곧 도는 순서다. */
@@ -197,7 +202,9 @@ export type Lecture = {
   hours: number;
   blocks: number;
   hideTeacher?: boolean;
-  repeatInSegment?: boolean;
+  oncePerSegment?: boolean;
+  /** 지정된 요일에만 배치한다. 비면 제한 없음. */
+  days?: number[];
 };
 
 export type SolveRequest = {

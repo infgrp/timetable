@@ -272,7 +272,8 @@ export function buildLectures(data: AppData): Lecture[] {
         hours: course.hours,
         blocks: Math.max(0, Math.min(course.blocks, Math.floor(course.hours / 2))),
         hideTeacher: course.hideTeacher,
-        repeatInSegment: course.repeatInSegment || undefined,
+        oncePerSegment: course.oncePerSegment || undefined,
+        days: course.days && course.days.length > 0 ? course.days : undefined,
       });
     }
   }
@@ -298,12 +299,20 @@ export function dayGroups(data: AppData): number[] {
 }
 
 /**
- * 이 체험반에서 같은 프로그램을 최대 몇 번 넣을 수 있는지 —
- * 등원 요일이 속한 구간 묶음 수(구간당 1회). repeat 이면 등원 요일 수(하루 1회).
+ * 이 체험반에서 같은 프로그램을 최대 몇 번 넣을 수 있는지.
+ * 기본은 등원 요일 수(하루 1회). oncePerSegment 면 등원 요일이 속한 구간 묶음 수(구간당 1회).
+ *
+ * 요일이 지정된 프로그램이면 그 요일만 센다.
  */
-export function comboLimitOf(data: AppData, klass: Klass, repeat: boolean): number {
-  const days = allowedDaysOf(data, klass);
-  if (repeat) return days.length;
+export function comboLimitOf(
+  data: AppData,
+  klass: Klass,
+  oncePerSegment: boolean,
+  onlyDays?: number[],
+): number {
+  let days = allowedDaysOf(data, klass);
+  if (onlyDays && onlyDays.length > 0) days = days.filter((d) => onlyDays.includes(d));
+  if (!oncePerSegment) return days.length;
   const groups = dayGroups(data);
   return new Set(days.map((d) => groups[d])).size;
 }
@@ -466,43 +475,69 @@ export function validate(data: AppData): Issue[] {
       });
   }
 
-  // 같은 체험반의 같은 프로그램은 구간당 1회(반복 허용이면 하루 1회) → 넣을 수 있는 묶음 수를
+  // 같은 체험반의 같은 프로그램은 하루 1회(구간당 1회를 켜면 구간 단위) → 넣을 수 있는 자리 수를
   // 넘게 배치되면 불가능. 여러 강사 배정으로 나뉘어 있을 수 있으므로 (반, 프로그램)별로 합산한다.
   const classById = new Map(data.classes.map((c) => [c.id, c]));
-  const comboUnits = new Map<string, { classId: string; subject: string; count: number; courses: number; repeat: boolean; mixed: boolean }>();
+  const comboUnits = new Map<
+    string,
+    { classId: string; subject: string; count: number; courses: number; once: boolean; mixed: boolean; days: number[] }
+  >();
   for (const lec of lectures) {
     if (!classById.has(lec.classId)) continue;
     const key = `${lec.classId}|${lec.subject}`;
     const units = lec.blocks + (lec.hours - lec.blocks * 2);
-    const repeat = Boolean(lec.repeatInSegment);
-    const e = comboUnits.get(key) ?? { classId: lec.classId, subject: lec.subject, count: 0, courses: 0, repeat, mixed: false };
-    if (e.courses > 0 && e.repeat !== repeat) e.mixed = true;
+    const once = Boolean(lec.oncePerSegment);
+    const e =
+      comboUnits.get(key) ??
+      { classId: lec.classId, subject: lec.subject, count: 0, courses: 0, once, mixed: false, days: [] as number[] };
+    if (e.courses > 0 && e.once !== once) e.mixed = true;
     e.count += units;
     e.courses += 1;
+    // 요일을 지정한 배정이 섞여 있으면 그 요일들의 합집합만 쓸 수 있다.
+    if (lec.days && lec.days.length > 0) e.days = [...new Set([...e.days, ...lec.days])];
     comboUnits.set(key, e);
   }
   for (const e of comboUnits.values()) {
     const klass = classById.get(e.classId)!;
     const inSegment = Boolean(segmentOf(data, klass));
-    const rule = e.repeat || !inSegment ? "하루 1회" : "구간당 1회";
-    const limit = comboLimitOf(data, klass, e.repeat);
+    const rule = e.once && inSegment ? "구간당 1회" : "하루 1회";
+    const limit = comboLimitOf(data, klass, e.once, e.days);
+    const pinned = e.days.length > 0 ? `${e.days.map((d) => data.days[d] ?? "?").join("·")}요일로 지정되어 ` : "";
     if (e.count > limit)
       issues.push({
         level: "error",
-        text: `${klass.name} ${e.subject}: 같은 프로그램은 ${rule}만 진행하므로 ${limit}회까지 가능한데 ${e.count}회가 필요합니다. ${
-          inSegment && !e.repeat ? "배정에서 [구간 안 반복]을 켜거나, " : ""
+        text: `${klass.name} ${e.subject}: ${pinned}같은 프로그램은 ${rule}만 진행하므로 ${limit}회까지 가능한데 ${e.count}회가 필요합니다. ${
+          e.once ? "배정에서 [구간당 1회]를 끄거나, " : e.days.length > 0 ? "지정 요일을 늘리거나, " : ""
         }연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
       });
     else if (e.mixed)
       issues.push({
         level: "warn",
-        text: `${klass.name} ${e.subject}: 같은 프로그램인데 배정마다 [구간 안 반복] 설정이 다릅니다. 반복을 켠 배정만 여러 날에 놓입니다.`,
+        text: `${klass.name} ${e.subject}: 같은 프로그램인데 배정마다 [구간당 1회] 설정이 다릅니다. 켠 배정만 구간 안에서 한 번으로 묶입니다.`,
       });
     else if (e.courses > 1)
       issues.push({
         level: "warn",
         text: `${klass.name} ${e.subject}: 같은 프로그램이 배정 ${e.courses}건으로 나뉘어 있습니다. ${rule} 규칙에 걸릴 수 있으니 의도한 것인지 확인하세요.`,
       });
+  }
+
+  // 요일을 지정했는데 그 반이 오지 않는 날이면 아예 못 들어간다.
+  for (const course of data.courses) {
+    const days = course.days?.filter((d) => d >= 0 && d < D) ?? [];
+    if (days.length === 0) continue;
+    for (const classId of course.classIds) {
+      const klass = classById.get(classId);
+      if (!klass) continue;
+      const usable = allowedDaysOf(data, klass).filter((d) => days.includes(d));
+      if (usable.length === 0)
+        issues.push({
+          level: "error",
+          text: `${klass.name} ${course.subject || "(프로그램 미입력)"}: ${days
+            .map((d) => data.days[d] ?? "?")
+            .join("·")}요일로 지정했는데 이 반은 그 요일에 오지 않습니다.`,
+        });
+    }
   }
 
   // 블록을 놓을 자리가 있는지 — 고정 활동에 막히지 않은 자리가 하나라도 있어야 한다.
