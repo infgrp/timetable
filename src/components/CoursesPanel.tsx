@@ -65,7 +65,7 @@ export default function CoursesPanel({ data, set }: Props) {
     <div className="flex flex-col gap-5">
       <Card
         title={`프로그램 배정 (${data.courses.length}건)`}
-        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다. 같은 반의 같은 프로그램은 운영 구간에 한 번만 배치되며, 매일 하는 수업은 [구간 안 반복]을 켜세요."
+        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다. 같은 반의 같은 프로그램은 하루에 한 번만 배치되며, 요일이 정해진 과목은 [지정 요일]을 켜세요."
         right={
           <Button variant="primary" onClick={addCourse}>
             + 배정 추가
@@ -112,13 +112,14 @@ export default function CoursesPanel({ data, set }: Props) {
                   <th className="w-24 py-2">주당 시수</th>
                   <th className="w-24 py-2">연속 2교시</th>
                   <th className="w-44 py-2">체험존</th>
+                  <th className="w-32 py-2" title="비워 두면 아무 요일에나 들어갑니다">지정 요일</th>
                   <th className="w-24 py-2" title="체험반 시간표에 강사 이름을 적을지">강사 표기</th>
                   {data.segments.length > 0 && (
                     <th
                       className="w-24 py-2"
-                      title="기본은 같은 반에서 같은 프로그램을 구간(예: 월·화)에 한 번만 넣습니다. 매일 하는 수업(홈룸 영어 등)은 켜서 여러 날에 나눠 넣게 하세요."
+                      title="기본은 하루 1회 — 같은 반에서 하루에 한 번씩이면 여러 날에 나옵니다. 존 체험처럼 한 구간(예: 월·화)에 딱 한 번이어야 하는 프로그램만 켜세요."
                     >
-                      구간 안 반복
+                      구간당 1회
                     </th>
                   )}
                   <th className="w-24 py-2" />
@@ -242,6 +243,33 @@ export default function CoursesPanel({ data, set }: Props) {
                         </Select>
                       </td>
                       <td className="py-1.5 pr-2">
+                        <div className="flex flex-wrap gap-1 pt-1.5">
+                          {data.days.map((day, di) => {
+                            const on = (c.days ?? []).includes(di);
+                            return (
+                              <button
+                                key={day}
+                                type="button"
+                                title={on ? `${day}요일에만 배치` : "누르면 이 요일로 못 박습니다"}
+                                onClick={() => {
+                                  const next = on
+                                    ? (c.days ?? []).filter((x) => x !== di)
+                                    : [...(c.days ?? []), di].sort((a, b) => a - b);
+                                  patch(c.id, { days: next.length > 0 ? next : undefined });
+                                }}
+                                className={`h-6 w-6 rounded border text-[11px] font-bold transition ${
+                                  on
+                                    ? "border-tt-600 bg-tt-600 text-white"
+                                    : "border-tt-200 bg-white text-tt-400 hover:bg-tt-50"
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </td>
+                      <td className="py-1.5 pr-2">
                         <label className="flex cursor-pointer items-center gap-1.5 pt-2 text-xs font-semibold text-tt-600">
                           <input
                             type="checkbox"
@@ -255,14 +283,14 @@ export default function CoursesPanel({ data, set }: Props) {
                         <td className="py-1.5 pr-2">
                           <label
                             className="flex cursor-pointer items-center gap-1.5 pt-2 text-xs font-semibold text-tt-600"
-                            title="끄면 구간당 1회, 켜면 하루 1회(구간 안에서 여러 날 가능)"
+                            title="켜면 이 프로그램을 구간 안에 딱 한 번만 넣는다 (기본은 하루 1회)"
                           >
                             <input
                               type="checkbox"
-                              checked={Boolean(c.repeatInSegment)}
-                              onChange={(e) => patch(c.id, { repeatInSegment: e.target.checked || undefined })}
+                              checked={Boolean(c.oncePerSegment)}
+                              onChange={(e) => patch(c.id, { oncePerSegment: e.target.checked || undefined })}
                             />
-                            {c.repeatInSegment ? "하루 1회" : "구간 1회"}
+                            {c.oncePerSegment ? "구간 1회" : "하루 1회"}
                           </label>
                         </td>
                       )}

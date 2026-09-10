@@ -41,7 +41,7 @@ export function fromSolveResult(result: SolveResult, lectures: Lecture[]): Assig
         period: unit.period,
         length: unit.length === 2 ? 2 : 1,
         hideTeacher: lec.hideTeacher,
-        repeatInSegment: lec.repeatInSegment,
+        oncePerSegment: lec.oncePerSegment,
       }),
     );
   }
@@ -239,20 +239,20 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   collect(byTeacher, "teacher", (id) => teacherName.get(id) ?? "(삭제된 강사)");
   collect(byRoom, "room", (id) => roomName.get(id) ?? "(삭제된 체험존)");
 
-  // 같은 체험반의 같은 프로그램은 구간당 1회(반복 허용이면 하루 1회) — 손으로 고치다 두 번 넣으면 알린다.
-  // 엑셀로 올린 배치에는 반복 허용 표시가 없으므로 같은 (반, 프로그램) 배정의 설정을 빌려 쓴다.
+  // 같은 체험반의 같은 프로그램은 하루 1회(구간당 1회를 켜면 구간 단위) — 손으로 고치다 두 번 넣으면 알린다.
+  // 엑셀로 올린 배치에는 이 표시가 없으므로 같은 (반, 프로그램) 배정의 설정을 빌려 쓴다.
   const groups = dayGroups(data);
-  const repeatByCombo = new Map<string, boolean>();
+  const onceByCombo = new Map<string, boolean>();
   for (const c of data.courses) {
-    if (!c.repeatInSegment) continue;
-    for (const classId of c.classIds) repeatByCombo.set(`${classId}|${c.subject.trim()}`, true);
+    if (!c.oncePerSegment) continue;
+    for (const classId of c.classIds) onceByCombo.set(`${classId}|${c.subject.trim()}`, true);
   }
   const byDup = new Map<string, Assignment[]>();
   for (const a of usable) {
     const subject = a.subject.trim();
     if (!subject) continue;
-    const repeat = a.repeatInSegment ?? repeatByCombo.get(`${a.classId}|${subject}`) ?? false;
-    bucket(byDup, `${a.classId}|${subject}|${repeat ? "d" : "g"}|${repeat ? a.day : groups[a.day]}`, a);
+    const once = a.oncePerSegment ?? onceByCombo.get(`${a.classId}|${subject}`) ?? false;
+    bucket(byDup, `${a.classId}|${subject}|${once ? "g" : "d"}|${once ? groups[a.day] : a.day}`, a);
   }
   for (const [key, arr] of byDup) {
     const ids = [...new Set(arr.map((a) => a.id))];

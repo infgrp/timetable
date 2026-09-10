@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, validate, migrate } from "../src/store";
+import { buildLectures, defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, comboLimitOf, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, validate, migrate } from "../src/store";
 import { calendarPeriods, changeDays, changeSlots, dayPeriods, scopeData, mergeSolved } from "../src/calendar";
 import { buildGrids, conflictsOf, fits, fromSolveResult, newAssignment } from "../src/assignments";
 import { sampleData } from "../src/sample";
@@ -70,16 +70,21 @@ await check("교시 삭제 시 배정·고정 활동·회피 시간의 참조 �
 
 await check("월화 생성 → 수목금 생성 → 월화 재생성에서 수목금 보존", () => {
   let data = sampleData();
+  // 기대 시수는 예시 데이터에서 직접 뽑는다 — 예시를 손봐도 검사가 깨지지 않도록.
+  const hoursOf = (d: AppData, ids: Set<string>) =>
+    buildLectures(d).filter((l) => ids.has(l.classId)).reduce((n, l) => n + l.hours, 0);
+  const allHours = hoursOf(data, new Set(data.classes.map((c) => c.id)));
   const early = scopeData(data, data.segments[0].id);
+  const earlyIds = new Set(early.classes.map((c) => c.id));
   data = mergeSolved(data, early.classes.map((c) => c.id), solved(early));
-  assert.equal(data.timetable.reduce((n,a) => n+a.length,0), 30);
+  assert.equal(data.timetable.reduce((n,a) => n+a.length,0), hoursOf(data, earlyIds));
   const late = scopeData(data, data.segments[1].id);
   data = mergeSolved(data, late.classes.map((c) => c.id), solved(late, 2, data.timetable));
   const lateIds = new Set(late.classes.map((c) => c.id));
   const preserved = data.timetable.filter((a) => lateIds.has(a.classId));
   const next = mergeSolved(data, early.classes.map((c) => c.id), solved(early, 3, preserved));
   assert.deepEqual(next.timetable.filter((a) => lateIds.has(a.classId)), preserved);
-  assert.equal(next.timetable.reduce((n,a) => n+a.length,0), 78);
+  assert.equal(next.timetable.reduce((n,a) => n+a.length,0), allHours);
   assert.deepEqual(conflictsOf(next, next.timetable), []);
 });
 
@@ -212,7 +217,7 @@ await check("전체 예시 20회 배치·통합 보기 회귀", () => {
   assert(html.includes("빈 칸 0"));
 });
 
-await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으로 나뉘어도)", () => {
+await check("[구간당 1회]를 켠 프로그램은 여러 배정으로 나뉘어도 한 번만", () => {
   const base: AppData = {
     ...defaultData(), days: ["월", "화", "수"], fixedActivities: [],
     slots: generateSlots({ ...DEFAULT_GEN, periodCount: 3, lunchAfter: 0 }),
@@ -221,8 +226,8 @@ await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으�
     teachers: [{ id: "T1", name: "강사1", unavailable: [] }, { id: "T2", name: "강사2", unavailable: [] }],
     rooms: [],
     courses: [
-      { id: "c1", teacherId: "T1", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null },
-      { id: "c2", teacherId: "T2", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null },
+      { id: "c1", teacherId: "T1", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null, oncePerSegment: true },
+      { id: "c2", teacherId: "T2", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null, oncePerSegment: true },
     ], timetable: [],
   };
   // 월·화 구간의 반에 같은 프로그램이 두 배정으로 2회 → 구간당 1회라 불가능. 검증이 막는다.
@@ -235,9 +240,9 @@ await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으�
   ];
   assert(conflictsOf(base, dup).some((c) => c.kind === "duplicate" && c.text.includes("구간당 1회")));
 
-  // 매일 하는 수업은 [구간 안 반복]을 켜면 하루 1회 — 서로 다른 날에 놓인다.
+  // 기본(하루 1회)인 수업은 서로 다른 날에 놓인다.
   const repeat: AppData = { ...base, courses: [
-    { id: "c", teacherId: "T1", subject: "Homeroom", classIds: ["K"], hours: 2, blocks: 0, roomId: null, repeatInSegment: true },
+    { id: "c", teacherId: "T1", subject: "Homeroom", classIds: ["K"], hours: 2, blocks: 0, roomId: null },
   ] };
   assert.equal(validate(repeat).filter((i) => i.level === "error").length, 0);
   for (let seed = 1; seed <= 5; seed++) {
@@ -246,7 +251,7 @@ await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으�
     assert.equal(new Set(days).size, 2);
     assert(days.every((d) => d < 2));
   }
-  // 반복을 켰어도 같은 날 두 번은 안 된다. 엑셀에서 올라온 배치(표시 없음)도 배정 설정을 빌려 판정한다.
+  // 기본이어도 같은 날 두 번은 안 된다. 엑셀에서 올라온 배치(표시 없음)도 배정 설정을 빌려 판정한다.
   const sameDay = [
     newAssignment({ classId: "K", subject: "Homeroom", teacherId: "T1", day: 0, period: 0 }),
     newAssignment({ classId: "K", subject: "Homeroom", teacherId: "T1", day: 0, period: 2 }),
@@ -254,9 +259,9 @@ await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으�
   assert(conflictsOf(repeat, sameDay).some((c) => c.kind === "duplicate" && c.text.includes("하루 1회")));
   const twoDays = [sameDay[0], { ...sameDay[1], day: 1 }];
   assert.deepEqual(conflictsOf(repeat, twoDays), []);
-  // 반복을 끄면 같은 시수라도 구간당 1회에 걸린다.
-  const strict: AppData = { ...repeat, courses: [{ ...repeat.courses[0], repeatInSegment: undefined }] };
-  assert(validate(strict).some((i) => i.level === "error" && i.text.includes("구간 안 반복")));
+  // [구간당 1회]를 켜면 같은 시수라도 구간당 1회에 걸린다.
+  const strict: AppData = { ...repeat, courses: [{ ...repeat.courses[0], oncePerSegment: true }] };
+  assert(validate(strict).some((i) => i.level === "error" && i.text.includes("구간당 1회")));
   assert(conflictsOf(strict, twoDays).some((c) => c.kind === "duplicate"));
 
   // 구간이 없는 반은 예전처럼 하루 1회 — 2시수가 서로 다른 날로 나뉜다.
@@ -269,7 +274,7 @@ await check("같은 반 동일 프로그램은 구간당 1회 (여러 배정으�
   }
 });
 
-await check("구간이 있는 반에서 기본 배정은 구간마다 한 번만 놓임", () => {
+await check("[구간당 1회] 배정은 구간마다 한 번만 놓임", () => {
   // 월·화 반에 프로그램 1시수 배정 → 월 또는 화 중 하루에만. 20회 돌려 어느 요일에도 두 번 나오지 않는지.
   const data: AppData = {
     ...defaultData(), days: ["월", "화", "수", "목"], fixedActivities: [],
@@ -279,9 +284,9 @@ await check("구간이 있는 반에서 기본 배정은 구간마다 한 번만
     teachers: [{ id: "T1", name: "T1", unavailable: [] }, { id: "T2", name: "T2", unavailable: [] }],
     rooms: [],
     courses: [
-      { id: "c1", teacherId: "T1", subject: "Airport", classIds: ["K", "L"], hours: 1, blocks: 0, roomId: null },
-      { id: "c2", teacherId: "T2", subject: "Shop", classIds: ["K", "L"], hours: 1, blocks: 0, roomId: null },
-      { id: "c3", teacherId: "T1", subject: "Homeroom", classIds: ["K", "L"], hours: 2, blocks: 0, roomId: null, repeatInSegment: true },
+      { id: "c1", teacherId: "T1", subject: "Airport", classIds: ["K", "L"], hours: 1, blocks: 0, roomId: null, oncePerSegment: true },
+      { id: "c2", teacherId: "T2", subject: "Shop", classIds: ["K", "L"], hours: 1, blocks: 0, roomId: null, oncePerSegment: true },
+      { id: "c3", teacherId: "T1", subject: "Homeroom", classIds: ["K", "L"], hours: 2, blocks: 0, roomId: null },
     ], timetable: [],
   };
   assert.equal(validate(data).filter((i) => i.level === "error").length, 0);
@@ -332,6 +337,82 @@ await check("고정 활동 체험존은 그 존 시간표에도 나타남", () =
   // 존을 지정하지 않은 고정 활동은 어느 존 표에도 들어가지 않는다.
   assert.equal(g.byRoom.get("R2")![2][0], null);
   assert.equal(g.byRoom.get("HALL")![2][0], null);
+});
+
+await check("구간에 모든 운영 요일을 넣어도 하루 1회로 그대로 배치됨", () => {
+  // 신고된 증상: 구간에 요일을 전부 고르면 시간표가 반영되지 않았다.
+  // 원인은 구간 전체가 한 묶음이 되어 같은 프로그램이 주 1회로 묶인 것.
+  const days = ["월", "화", "수", "목", "금"];
+  const make = (segDays: number[] | null): AppData => ({
+    ...defaultData(), days, fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 2, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "A반", segmentId: segDays ? "all" : null }],
+    segments: segDays ? [{ id: "all", name: "전체 등원", days: segDays }] : [],
+    teachers: [{ id: "T1", name: "김선생", unavailable: [] }],
+    rooms: [],
+    courses: [
+      { id: "c", teacherId: "T1", subject: "Homeroom", classIds: ["K"], hours: 4, blocks: 0, roomId: null },
+    ],
+    timetable: [],
+  });
+
+  const withAll = make([0, 1, 2, 3, 4]);
+  assert.deepEqual(allowedDaysOf(withAll, withAll.classes[0]), [0, 1, 2, 3, 4]);
+  assert.equal(comboLimitOf(withAll, withAll.classes[0], false), 5);
+  assert.equal(validate(withAll).filter((i) => i.level === "error").length, 0);
+
+  // 구간을 둔 쪽과 두지 않은 쪽이 똑같이 4시간을 서로 다른 날에 넣는다.
+  for (const data of [withAll, make(null)]) {
+    for (let seed = 1; seed <= 10; seed++) {
+      const list = solved(data, seed);
+      assert.equal(list.length, 4);
+      assert.equal(new Set(list.map((a) => a.day)).size, 4);
+    }
+  }
+
+  // [구간당 1회]를 켜야만 주 1회로 묶인다.
+  const once: AppData = { ...withAll, courses: [{ ...withAll.courses[0], hours: 1, oncePerSegment: true }] };
+  assert.equal(comboLimitOf(once, once.classes[0], true), 1);
+});
+
+await check("프로그램을 특정 요일에 못 박기 (Science 1 은 월, Science 2 는 화)", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월", "화", "수"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 3, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "A반" }],
+    segments: [],
+    teachers: [{ id: "T1", name: "김선생", unavailable: [] }],
+    rooms: [],
+    courses: [
+      // 2시수를 하루에 못 박으려면 연속 2교시(블록)여야 한다 — 하루 1회 규칙과 어긋나지 않게.
+      { id: "s1", teacherId: "T1", subject: "Science 1", classIds: ["K"], hours: 2, blocks: 1, roomId: null, days: [0] },
+      { id: "s2", teacherId: "T1", subject: "Science 2", classIds: ["K"], hours: 1, blocks: 0, roomId: null, days: [1] },
+      { id: "f", teacherId: "T1", subject: "Free", classIds: ["K"], hours: 1, blocks: 0, roomId: null },
+    ],
+    timetable: [],
+  };
+  assert.equal(validate(data).filter((i) => i.level === "error").length, 0);
+
+  for (let seed = 1; seed <= 20; seed++) {
+    const list = solved(data, seed);
+    assert.equal(list.reduce((n, a) => n + a.length, 0), 4);
+    // Science 1 은 월요일 연속 2교시 한 덩어리로만 들어간다.
+    const s1 = list.filter((a) => a.subject === "Science 1");
+    assert.equal(s1.length, 1);
+    assert.equal(s1[0].day, 0);
+    assert.equal(s1[0].length, 2);
+    const s2 = list.filter((a) => a.subject === "Science 2");
+    assert.equal(s2.length, 1);
+    assert.equal(s2[0].day, 1);
+  }
+
+  // 지정 요일이 그 반의 등원일이 아니면 미리 막는다.
+  const offDay: AppData = {
+    ...data,
+    classes: [{ id: "K", name: "A반", segmentId: "seg" }],
+    segments: [{ id: "seg", name: "화수", days: [1, 2] }],
+  };
+  assert(validate(offDay).some((i) => i.level === "error" && i.text.includes("그 요일에 오지 않습니다")));
 });
 
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);
