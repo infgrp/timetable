@@ -15,9 +15,10 @@ export default function CoursesPanel({ data, set }: Props) {
 
   // 선택된 구간에 속한 체험반 id 집합 (전체 탭이면 null)
   const segClassIds = useMemo(() => {
-    if (!segTab) return null;
+    // 탭에 잡아 둔 구간이 삭제됐으면 전체 보기로 (탭 바가 사라진 채 필터만 남지 않게)
+    if (!segTab || !data.segments.some((s) => s.id === segTab)) return null;
     return new Set(data.classes.filter((c) => c.segmentId === segTab).map((c) => c.id));
-  }, [segTab, data.classes]);
+  }, [segTab, data.classes, data.segments]);
 
   // 이 구간 탭에서 보여줄 배정 — 그 구간 반을 하나라도 맡거나, 아직 반이 없는 새 배정.
   const visibleCourses = useMemo(() => {
@@ -64,7 +65,7 @@ export default function CoursesPanel({ data, set }: Props) {
     <div className="flex flex-col gap-5">
       <Card
         title={`프로그램 배정 (${data.courses.length}건)`}
-        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다."
+        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다. 같은 반의 같은 프로그램은 운영 구간에 한 번만 배치되며, 매일 하는 수업은 [구간 안 반복]을 켜세요."
         right={
           <Button variant="primary" onClick={addCourse}>
             + 배정 추가
@@ -112,6 +113,14 @@ export default function CoursesPanel({ data, set }: Props) {
                   <th className="w-24 py-2">연속 2교시</th>
                   <th className="w-44 py-2">체험존</th>
                   <th className="w-24 py-2" title="체험반 시간표에 강사 이름을 적을지">강사 표기</th>
+                  {data.segments.length > 0 && (
+                    <th
+                      className="w-24 py-2"
+                      title="기본은 같은 반에서 같은 프로그램을 구간(예: 월·화)에 한 번만 넣습니다. 매일 하는 수업(홈룸 영어 등)은 켜서 여러 날에 나눠 넣게 하세요."
+                    >
+                      구간 안 반복
+                    </th>
+                  )}
                   <th className="w-24 py-2" />
                 </tr>
               </thead>
@@ -242,6 +251,21 @@ export default function CoursesPanel({ data, set }: Props) {
                           {c.hideTeacher ? "숨김" : "표기"}
                         </label>
                       </td>
+                      {data.segments.length > 0 && (
+                        <td className="py-1.5 pr-2">
+                          <label
+                            className="flex cursor-pointer items-center gap-1.5 pt-2 text-xs font-semibold text-tt-600"
+                            title="끄면 구간당 1회, 켜면 하루 1회(구간 안에서 여러 날 가능)"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(c.repeatInSegment)}
+                              onChange={(e) => patch(c.id, { repeatInSegment: e.target.checked || undefined })}
+                            />
+                            {c.repeatInSegment ? "하루 1회" : "구간 1회"}
+                          </label>
+                        </td>
+                      )}
                       <td className="py-1.5">
                         <div className="flex gap-1">
                           <Button onClick={() => duplicate(c)} title="복제">

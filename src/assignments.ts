@@ -5,7 +5,7 @@
  * 화면 격자·엑셀 내보내기·로테이션은 모두 이 목록만 읽는다.
  */
 import type { AppData, Assignment, Lecture, SolveResult } from "./types";
-import { allowedDaysOf, blockableFlags, fixedCellNames, fixedCellRooms, slotKey, uid } from "./store";
+import { allowedDaysOf, blockableFlags, dayGroups, fixedCellNames, fixedCellRooms, slotKey, uid } from "./store";
 import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
 import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
@@ -41,6 +41,7 @@ export function fromSolveResult(result: SolveResult, lectures: Lecture[]): Assig
         period: unit.period,
         length: unit.length === 2 ? 2 : 1,
         hideTeacher: lec.hideTeacher,
+        repeatInSegment: lec.repeatInSegment,
       }),
     );
   }
@@ -238,19 +239,32 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   collect(byTeacher, "teacher", (id) => teacherName.get(id) ?? "(삭제된 강사)");
   collect(byRoom, "room", (id) => roomName.get(id) ?? "(삭제된 체험존)");
 
-  // 같은 체험반의 같은 프로그램은 하루 1회만 — 손으로 고치다 두 번 넣으면 알린다.
+  // 같은 체험반의 같은 프로그램은 구간당 1회(반복 허용이면 하루 1회) — 손으로 고치다 두 번 넣으면 알린다.
+  // 엑셀로 올린 배치에는 반복 허용 표시가 없으므로 같은 (반, 프로그램) 배정의 설정을 빌려 쓴다.
+  const groups = dayGroups(data);
+  const repeatByCombo = new Map<string, boolean>();
+  for (const c of data.courses) {
+    if (!c.repeatInSegment) continue;
+    for (const classId of c.classIds) repeatByCombo.set(`${classId}|${c.subject.trim()}`, true);
+  }
   const byDup = new Map<string, Assignment[]>();
   for (const a of usable) {
-    if (!a.subject.trim()) continue;
-    bucket(byDup, `${a.classId}|${a.subject.trim()}|${a.day}`, a);
+    const subject = a.subject.trim();
+    if (!subject) continue;
+    const repeat = a.repeatInSegment ?? repeatByCombo.get(`${a.classId}|${subject}`) ?? false;
+    bucket(byDup, `${a.classId}|${subject}|${repeat ? "d" : "g"}|${repeat ? a.day : groups[a.day]}`, a);
   }
   for (const [key, arr] of byDup) {
     const ids = [...new Set(arr.map((a) => a.id))];
     if (ids.length < 2) continue;
-    const [classId, subject, day] = key.split("|");
+    const [classId, subject, mode] = key.split("|");
+    const days = [...new Set(arr.map((a) => a.day))].sort((x, y) => x - y).map((d) => data.days[d] ?? "?");
+    const where = mode === "d" ? days[0] : days.length > 1 ? `${days.join("·")}(같은 구간)` : days[0];
     out.push({
       kind: "duplicate",
-      text: `${className.get(classId) ?? "?"} — ${data.days[Number(day)] ?? "?"}에 "${subject}"가 ${ids.length}번 있습니다. 같은 프로그램은 하루 1회만 진행합니다.`,
+      text: `${className.get(classId) ?? "?"} — ${where}에 "${subject}"가 ${ids.length}번 있습니다. 같은 프로그램은 ${
+        mode === "d" ? "하루 1회" : "구간당 1회"
+      }만 진행합니다.`,
       ids,
     });
   }

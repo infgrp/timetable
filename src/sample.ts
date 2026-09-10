@@ -33,20 +33,21 @@ export function sampleData(): AppData {
   ].map((name) => ({ id: uid("r"), name }));
   const zone = (name: string) => rooms.find((r) => r.name === name)!.id;
 
-  // [강사, 프로그램, 담당 체험반, 반당 주당 시수, 연속 2교시 횟수, 체험존, 강사 숨김]
-  const spec: [string, string, string[], number, number, string | null, boolean][] = [
-    ["Emma Clark", "Airport & Immigration", allIds, 1, 0, zone("공항·출입국존"), false],
-    ["Jack Miller", "Restaurant & Ordering", allIds, 1, 0, zone("레스토랑존"), false],
-    ["Olivia Brown", "Shopping & Money", allIds, 1, 0, zone("마트·쇼핑존"), false],
-    ["Liam Davis", "Clinic & Health", allIds, 1, 0, zone("병원·클리닉존"), false],
-    ["Sophia Wilson", "Media Studio", allIds, 1, 0, zone("미디어 스튜디오"), false],
-    ["박세계", "World Culture", allIds, 1, 0, zone("컬처룸"), false],
-    ["김지영", "Homeroom English", earlyIds, 2, 0, null, false],
-    ["한도윤", "Project Time", earlyIds, 2, 1, null, false],
-    ["이수민", "Homeroom English", lateIds, 4, 1, null, false],
-    ["최윤아", "Phonics & Reading", lateIds, 3, 0, null, false],
+  // [강사, 프로그램, 담당 체험반, 반당 주당 시수, 연속 2교시 횟수, 체험존, 강사 숨김, 구간 안 반복]
+  // 체험존 프로그램은 구간당 1회(기본). 홈룸·파닉스처럼 매일 하는 수업만 반복을 켠다.
+  const spec: [string, string, string[], number, number, string | null, boolean, boolean][] = [
+    ["Emma Clark", "Airport & Immigration", allIds, 1, 0, zone("공항·출입국존"), false, false],
+    ["Jack Miller", "Restaurant & Ordering", allIds, 1, 0, zone("레스토랑존"), false, false],
+    ["Olivia Brown", "Shopping & Money", allIds, 1, 0, zone("마트·쇼핑존"), false, false],
+    ["Liam Davis", "Clinic & Health", allIds, 1, 0, zone("병원·클리닉존"), false, false],
+    ["Sophia Wilson", "Media Studio", allIds, 1, 0, zone("미디어 스튜디오"), false, false],
+    ["박세계", "World Culture", allIds, 1, 0, zone("컬처룸"), false, false],
+    ["김지영", "Homeroom English", earlyIds, 2, 0, null, false, true],
+    ["한도윤", "Project Time", earlyIds, 2, 1, null, false, false],
+    ["이수민", "Homeroom English", lateIds, 4, 1, null, false, true],
+    ["최윤아", "Phonics & Reading", lateIds, 3, 0, null, false, true],
     // 매주 담당이 바뀌는 수업 — 체험반 시간표에는 강사를 적지 않는다.
-    ["정하늘", "Adventure", lateIds, 3, 0, null, true],
+    ["정하늘", "Adventure", lateIds, 3, 0, null, true, true],
   ];
 
   const teacherId = new Map<string, string>();
@@ -85,7 +86,7 @@ export function sampleData(): AppData {
       name,
       unavailable: avoid[name] ?? [],
     })),
-    courses: spec.map(([name, subject, ids, hours, blocks, roomId, hideTeacher]) => ({
+    courses: spec.map(([name, subject, ids, hours, blocks, roomId, hideTeacher, repeatInSegment]) => ({
       id: uid("c"),
       teacherId: teacherId.get(name)!,
       subject,
@@ -94,6 +95,7 @@ export function sampleData(): AppData {
       blocks,
       roomId,
       hideTeacher: hideTeacher || undefined,
+      repeatInSegment: repeatInSegment || undefined,
     })),
     timetable: [],
     rotation: {

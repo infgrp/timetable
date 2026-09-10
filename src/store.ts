@@ -272,10 +272,40 @@ export function buildLectures(data: AppData): Lecture[] {
         hours: course.hours,
         blocks: Math.max(0, Math.min(course.blocks, Math.floor(course.hours / 2))),
         hideTeacher: course.hideTeacher,
+        repeatInSegment: course.repeatInSegment || undefined,
       });
     }
   }
   return out;
+}
+
+/**
+ * 요일 → 운영 구간 묶음 번호. 어느 구간에도 속하지 않은 요일은 저마다 다른 묶음(하루 1회)이다.
+ * 한 요일이 여러 구간에 들어 있으면 먼저 정의된 구간이 이긴다.
+ */
+export function dayGroups(data: AppData): number[] {
+  const D = data.days.length;
+  const group = Array.from({ length: D }, (_, d) => d);
+  const taken = new Set<number>();
+  data.segments.forEach((seg, si) => {
+    const days = seg.days.filter((d) => d >= 0 && d < D && !taken.has(d));
+    for (const d of days) {
+      group[d] = D + si;
+      taken.add(d);
+    }
+  });
+  return group;
+}
+
+/**
+ * 이 체험반에서 같은 프로그램을 최대 몇 번 넣을 수 있는지 —
+ * 등원 요일이 속한 구간 묶음 수(구간당 1회). repeat 이면 등원 요일 수(하루 1회).
+ */
+export function comboLimitOf(data: AppData, klass: Klass, repeat: boolean): number {
+  const days = allowedDaysOf(data, klass);
+  if (repeat) return days.length;
+  const groups = dayGroups(data);
+  return new Set(days.map((d) => groups[d])).size;
 }
 
 /**
@@ -310,6 +340,7 @@ export function buildSolveRequest(
   return {
     dayCount: D,
     periodCount: P,
+    dayGroup: dayGroups(data),
     blockable: blockableFlags(data.slots),
     blockableByDay: data.days.map((_, d) => blockableFlags(slotsFor(data, d))),
     reservedTeacherCells: reserved(data.teachers.map((t) => t.id), "teacherId"),
@@ -435,31 +466,42 @@ export function validate(data: AppData): Issue[] {
       });
   }
 
-  // 같은 체험반의 같은 프로그램은 하루 1회 → 그 반의 등원 요일 수를 넘게 배치되면 불가능.
-  // 같은 프로그램이 여러 강사 배정으로 나뉘어 있을 수 있으므로 (반, 프로그램)별로 합산한다.
+  // 같은 체험반의 같은 프로그램은 구간당 1회(반복 허용이면 하루 1회) → 넣을 수 있는 묶음 수를
+  // 넘게 배치되면 불가능. 여러 강사 배정으로 나뉘어 있을 수 있으므로 (반, 프로그램)별로 합산한다.
   const classById = new Map(data.classes.map((c) => [c.id, c]));
-  const comboUnits = new Map<string, { classId: string; subject: string; count: number; courses: number }>();
+  const comboUnits = new Map<string, { classId: string; subject: string; count: number; courses: number; repeat: boolean; mixed: boolean }>();
   for (const lec of lectures) {
     if (!classById.has(lec.classId)) continue;
     const key = `${lec.classId}|${lec.subject}`;
     const units = lec.blocks + (lec.hours - lec.blocks * 2);
-    const e = comboUnits.get(key) ?? { classId: lec.classId, subject: lec.subject, count: 0, courses: 0 };
+    const repeat = Boolean(lec.repeatInSegment);
+    const e = comboUnits.get(key) ?? { classId: lec.classId, subject: lec.subject, count: 0, courses: 0, repeat, mixed: false };
+    if (e.courses > 0 && e.repeat !== repeat) e.mixed = true;
     e.count += units;
     e.courses += 1;
     comboUnits.set(key, e);
   }
   for (const e of comboUnits.values()) {
     const klass = classById.get(e.classId)!;
-    const dayCount = allowedDaysOf(data, klass).length;
-    if (e.count > dayCount)
+    const inSegment = Boolean(segmentOf(data, klass));
+    const rule = e.repeat || !inSegment ? "하루 1회" : "구간당 1회";
+    const limit = comboLimitOf(data, klass, e.repeat);
+    if (e.count > limit)
       issues.push({
         level: "error",
-        text: `${klass.name} ${e.subject}: 같은 프로그램은 하루 1회만 진행하므로 주 ${dayCount}회까지 가능한데 ${e.count}회가 필요합니다. 연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
+        text: `${klass.name} ${e.subject}: 같은 프로그램은 ${rule}만 진행하므로 ${limit}회까지 가능한데 ${e.count}회가 필요합니다. ${
+          inSegment && !e.repeat ? "배정에서 [구간 안 반복]을 켜거나, " : ""
+        }연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
+      });
+    else if (e.mixed)
+      issues.push({
+        level: "warn",
+        text: `${klass.name} ${e.subject}: 같은 프로그램인데 배정마다 [구간 안 반복] 설정이 다릅니다. 반복을 켠 배정만 여러 날에 놓입니다.`,
       });
     else if (e.courses > 1)
       issues.push({
         level: "warn",
-        text: `${klass.name} ${e.subject}: 같은 프로그램이 배정 ${e.courses}건으로 나뉘어 있습니다. 하루 1회 규칙에 걸릴 수 있으니 의도한 것인지 확인하세요.`,
+        text: `${klass.name} ${e.subject}: 같은 프로그램이 배정 ${e.courses}건으로 나뉘어 있습니다. ${rule} 규칙에 걸릴 수 있으니 의도한 것인지 확인하세요.`,
       });
   }
 

@@ -100,6 +100,12 @@ export type Course = {
    * 담당이 매주 바뀌는 수업(어드벤처 등)에 쓴다 — 강사 개인 시간표에는 그대로 나온다.
    */
   hideTeacher?: boolean;
+  /**
+   * 같은 반에서 이 프로그램이 운영 구간 안에 여러 번 나와도 된다 (매일 하는 홈룸 영어 등).
+   * 기본(false)은 "구간당 1회" — 월·화반이면 월 또는 화 중 하루에 한 번만 배치된다.
+   * 구간이 없는 반은 언제나 "하루 1회"로만 본다.
+   */
+  repeatInSegment?: boolean;
 };
 
 /**
@@ -123,6 +129,8 @@ export type Assignment = {
   length: 1 | 2;
   /** 체험반·체험존 시간표에서 강사 이름을 감춘다 (Course.hideTeacher 를 물려받는다) */
   hideTeacher?: boolean;
+  /** 구간 안 반복 허용 (Course.repeatInSegment 를 물려받는다). 없으면 구간당 1회로 본다. */
+  repeatInSegment?: boolean;
 };
 
 /** 로테이션 한 바퀴를 도는 강사 묶음. 목록의 순서가 곧 도는 순서다. */
@@ -189,11 +197,17 @@ export type Lecture = {
   hours: number;
   blocks: number;
   hideTeacher?: boolean;
+  repeatInSegment?: boolean;
 };
 
 export type SolveRequest = {
   dayCount: number;
   periodCount: number;
+  /**
+   * dayGroup[day] — 같은 값이면 같은 운영 구간. "같은 프로그램 구간당 1회" 판정에 쓴다.
+   * 생략하면 요일마다 다른 구간(= 하루 1회)으로 본다.
+   */
+  dayGroup?: number[];
   /** blockable[p] === true 이면 p 교시와 p+1 교시가 붙어 있다(사이에 점심·쉬는시간 없음). */
   blockable: boolean[];
   blockableByDay?: boolean[][];
