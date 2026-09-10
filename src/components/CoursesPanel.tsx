@@ -7,9 +7,25 @@ type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
 export default function CoursesPanel({ data, set }: Props) {
   const [openRow, setOpenRow] = useState<string | null>(null);
+  // 구간 탭: null = 전체, 그 외에는 Segment.id. 월·화반과 수·목·금반의 과목 구성이 다를 때 나눠 본다.
+  const [segTab, setSegTab] = useState<string | null>(null);
 
   const capacity = weekCapacity(data);
   const className = useMemo(() => new Map(data.classes.map((c) => [c.id, c.name])), [data.classes]);
+
+  // 선택된 구간에 속한 체험반 id 집합 (전체 탭이면 null)
+  const segClassIds = useMemo(() => {
+    if (!segTab) return null;
+    return new Set(data.classes.filter((c) => c.segmentId === segTab).map((c) => c.id));
+  }, [segTab, data.classes]);
+
+  // 이 구간 탭에서 보여줄 배정 — 그 구간 반을 하나라도 맡거나, 아직 반이 없는 새 배정.
+  const visibleCourses = useMemo(() => {
+    if (!segClassIds) return data.courses;
+    return data.courses.filter(
+      (c) => c.classIds.length === 0 || c.classIds.some((id) => segClassIds.has(id)),
+    );
+  }, [data.courses, segClassIds]);
 
   const totals = useMemo(() => {
     const lectures = buildLectures(data);
@@ -28,7 +44,12 @@ export default function CoursesPanel({ data, set }: Props) {
     set((d) => ({ ...d, courses: d.courses.map((c) => (c.id === id ? { ...c, ...p } : c)) }));
 
   const addCourse = () =>
-    set((d) => ({ ...d, courses: [...d.courses, emptyCourse(d.teachers[0]?.id ?? "")] }));
+    set((d) => {
+      const made = emptyCourse(d.teachers[0]?.id ?? "");
+      // 구간 탭이 켜져 있으면 그 구간의 반을 기본으로 담아 준다.
+      if (segClassIds) made.classIds = d.classes.filter((c) => segClassIds.has(c.id)).map((c) => c.id);
+      return { ...d, courses: [...d.courses, made] };
+    });
 
   const duplicate = (c: Course) =>
     set((d) => ({
@@ -50,8 +71,35 @@ export default function CoursesPanel({ data, set }: Props) {
           </Button>
         }
       >
+        {data.segments.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSegTab(null)}
+              className={`rounded-md px-3 py-1.5 text-xs font-bold ${
+                segTab === null ? "bg-tt-600 text-white" : "bg-tt-100 text-tt-600 hover:bg-tt-200"
+              }`}
+            >
+              전체
+            </button>
+            {data.segments.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => setSegTab(s.id)}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold ${
+                  segTab === s.id ? "bg-tt-600 text-white" : "bg-tt-100 text-tt-600 hover:bg-tt-200"
+                }`}
+              >
+                {s.name || "(이름없는 구간)"}
+              </button>
+            ))}
+          </div>
+        )}
         {data.courses.length === 0 ? (
           <Empty>배정이 없습니다. [+ 배정 추가]를 누르세요.</Empty>
+        ) : visibleCourses.length === 0 ? (
+          <Empty>이 구간에 배정된 프로그램이 없습니다. [+ 배정 추가]를 누르면 이 구간 반이 담긴 채로 시작합니다.</Empty>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
@@ -68,7 +116,7 @@ export default function CoursesPanel({ data, set }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {data.courses.map((c) => {
+                {visibleCourses.map((c) => {
                   const maxBlocks = Math.floor(c.hours / 2);
                   return (
                     <tr key={c.id} className="border-b border-tt-100 align-top last:border-0">
@@ -90,6 +138,13 @@ export default function CoursesPanel({ data, set }: Props) {
                           value={c.subject}
                           placeholder="예) Airport & Immigration"
                           onChange={(e) => patch(c.id, { subject: e.target.value })}
+                        />
+                        <TextInput
+                          value={c.teacherSubject ?? ""}
+                          placeholder="강사 표기(선택) 예) Adventure ①"
+                          title="비우면 위 프로그램명을 그대로 씁니다. 강사 개인 시간표에만 이 이름이 나옵니다."
+                          onChange={(e) => patch(c.id, { teacherSubject: e.target.value })}
+                          className="mt-1 text-xs"
                         />
                       </td>
                       <td className="py-1.5 pr-2">

@@ -5,7 +5,7 @@
  * 화면 격자·엑셀 내보내기·로테이션은 모두 이 목록만 읽는다.
  */
 import type { AppData, Assignment, Lecture, SolveResult } from "./types";
-import { allowedDaysOf, blockableFlags, fixedCellNames, slotKey, uid } from "./store";
+import { allowedDaysOf, blockableFlags, fixedCellNames, fixedCellRooms, slotKey, uid } from "./store";
 import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
 import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
@@ -36,6 +36,7 @@ export function fromSolveResult(result: SolveResult, lectures: Lecture[]): Assig
         teacherId: lec.teacherId,
         roomId: lec.roomId,
         subject: lec.subject,
+        teacherSubject: lec.teacherSubject,
         day: unit.day,
         period: unit.period,
         length: unit.length === 2 ? 2 : 1,
@@ -111,7 +112,7 @@ export function removeAssignment(list: Assignment[], id: string): Assignment[] {
 /** ── 충돌 검사 ───────────────────────────────────────── */
 
 export type Conflict = {
-  kind: "class" | "teacher" | "room" | "avoid" | "range" | "fixed" | "segment";
+  kind: "class" | "teacher" | "room" | "avoid" | "range" | "fixed" | "segment" | "duplicate";
   text: string;
   /** 이 충돌에 얽힌 배치 id */
   ids: string[];
@@ -125,6 +126,7 @@ const KIND_LABEL: Record<Conflict["kind"], string> = {
   range: "자리 오류",
   fixed: "고정 활동 자리",
   segment: "운영 구간 밖",
+  duplicate: "같은 프로그램 중복",
 };
 
 export function conflictLabel(kind: Conflict["kind"]): string {
@@ -236,6 +238,23 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   collect(byTeacher, "teacher", (id) => teacherName.get(id) ?? "(삭제된 강사)");
   collect(byRoom, "room", (id) => roomName.get(id) ?? "(삭제된 체험존)");
 
+  // 같은 체험반의 같은 프로그램은 하루 1회만 — 손으로 고치다 두 번 넣으면 알린다.
+  const byDup = new Map<string, Assignment[]>();
+  for (const a of usable) {
+    if (!a.subject.trim()) continue;
+    bucket(byDup, `${a.classId}|${a.subject.trim()}|${a.day}`, a);
+  }
+  for (const [key, arr] of byDup) {
+    const ids = [...new Set(arr.map((a) => a.id))];
+    if (ids.length < 2) continue;
+    const [classId, subject, day] = key.split("|");
+    out.push({
+      kind: "duplicate",
+      text: `${className.get(classId) ?? "?"} — ${data.days[Number(day)] ?? "?"}에 "${subject}"가 ${ids.length}번 있습니다. 같은 프로그램은 하루 1회만 진행합니다.`,
+      ids,
+    });
+  }
+
   // 강사 회피 시간
   const avoid = new Map(data.teachers.map((t) => [t.id, new Set(t.unavailable)]));
   for (const a of usable) {
@@ -279,13 +298,16 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
   for (const r of data.rooms) byRoom.set(r.id, blank());
 
   // 고정 활동을 먼저 깐다 — 체험반도 강사도 그 시간에는 여기에 묶여 있다.
-  // (특정 체험존을 쓰는 것이 아니므로 존 시간표에는 넣지 않는다.)
+  // 체험존이 지정된 활동(예: 강당에서 하는 Orientation)은 그 존 시간표에도 나타낸다.
+  const fixedRooms = fixedCellRooms(data);
   for (const [key, name] of fixedCellNames(data)) {
     const [d, p] = key.split(":").map(Number);
     if (!(d >= 0 && d < data.days.length && p >= 0 && p < periods.length)) continue;
     const cell: Cell = { top: name, span: 1, hue: 0, fixed: true };
     for (const c of data.classes) if (allowedDaysOf(data, c).includes(d)) byClass.get(c.id)![p][d] = cell;
     for (const grid of byTeacher.values()) grid[p][d] = cell;
+    const roomId = fixedRooms.get(key);
+    if (roomId && byRoom.has(roomId)) byRoom.get(roomId)![p][d] = cell;
   }
 
   const put = (grid: Grid | undefined, a: Assignment, cell: Cell) => {
@@ -318,7 +340,8 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
       put(byTeacher.get(a.teacherId), a, {
         ...base,
         top: className.get(a.classId) ?? "(삭제된 체험반)",
-        bottom: [a.subject, room].filter(Boolean).join(" · "),
+        // 강사 개인 표에는 teacherSubject(예: "Adventure ①")를 우선 쓴다.
+        bottom: [a.teacherSubject?.trim() || a.subject, room].filter(Boolean).join(" · "),
       });
     if (a.roomId)
       put(byRoom.get(a.roomId), a, {

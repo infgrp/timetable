@@ -52,6 +52,11 @@ export type FixedActivity = {
   name: string;
   /** `${dayIndex}:${periodIndex}` 키 목록. 강사 회피 시간과 같은 형식이다. */
   cells: string[];
+  /**
+   * 이 활동이 쓰는 체험존 (없으면 null).
+   * Orientation·Closing 을 특정 존에서 한다면 지정한다 — 그 존의 시간표에도 나타난다.
+   */
+  roomId?: string | null;
 };
 
 export type Room = {
@@ -77,6 +82,12 @@ export type Course = {
   id: string;
   teacherId: string;
   subject: string;
+  /**
+   * 강사 개인 시간표에만 쓰는 다른 표시명 (비우면 subject 를 그대로 쓴다).
+   * 체험반·체험존 표에는 Adventure 로, 강사 표에는 "Adventure ①" 처럼
+   * 로테이션 순번을 붙여 본인 차례를 알아보게 할 때 쓴다.
+   */
+  teacherSubject?: string;
   classIds: string[];
   /** 학급당 주당 시수 */
   hours: number;
@@ -103,6 +114,8 @@ export type Assignment = {
   teacherId: string | null;
   roomId: string | null;
   subject: string;
+  /** 강사 개인 시간표용 표시명 (Course.teacherSubject 를 물려받는다). 비면 subject 사용. */
+  teacherSubject?: string;
   /** days 의 index */
   day: number;
   /** break 를 제외한 수업 교시만 센 시작 index */
@@ -171,6 +184,7 @@ export type Lecture = {
   teacherId: string;
   classId: string;
   subject: string;
+  teacherSubject?: string;
   roomId: string | null;
   hours: number;
   blocks: number;

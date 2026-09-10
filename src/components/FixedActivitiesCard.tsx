@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AppData } from "../types";
 import { newFixedActivity, slotKey } from "../store";
-import { Button, Card, Empty, TextInput } from "./ui";
+import { Button, Card, Empty, Select, TextInput } from "./ui";
 import { calendarPeriods, dayPeriods } from "../calendar";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -76,7 +76,7 @@ export default function FixedActivitiesCard({ data, set }: Props) {
   return (
     <Card
       title={`요일별 고정 활동 (${data.fixedActivities.length}개)`}
-      desc="Orientation·Closing처럼 요일마다 자리가 정해진 활동입니다. 칠한 칸에는 프로그램이 배치되지 않으며, 그날 등원하는 체험반과 강사의 시간표에 나타납니다."
+      desc="Orientation·Closing처럼 요일마다 자리가 정해진 활동입니다. 칠한 칸에는 프로그램이 배치되지 않으며, 그날 등원하는 체험반과 강사의 시간표에 나타납니다. 체험존을 고르면 그 존 시간표에도 표시됩니다."
     >
       <div className="mb-3 flex flex-wrap items-center gap-1.5">
         {unusedPresets.map((n) => (
@@ -128,6 +128,28 @@ export default function FixedActivitiesCard({ data, set }: Props) {
                       }))
                     }
                   />
+                  {data.rooms.length > 0 && (
+                    <Select
+                      value={f.roomId ?? ""}
+                      title="이 활동을 진행하는 체험존 (선택하면 그 존 시간표에도 나타납니다)"
+                      onFocus={() => setSelected(f.id)}
+                      onChange={(e) =>
+                        set((d) => ({
+                          ...d,
+                          fixedActivities: d.fixedActivities.map((x) =>
+                            x.id === f.id ? { ...x, roomId: e.target.value || null } : x,
+                          ),
+                        }))
+                      }
+                    >
+                      <option value="">존 없음</option>
+                      {data.rooms.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                   <Button
                     variant="danger"
                     title="삭제"

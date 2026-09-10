@@ -197,6 +197,26 @@ export function fixedCellSet(data: AppData): Set<string> {
   return new Set(fixedCellNames(data).keys());
 }
 
+/**
+ * `${day}:${period}` → 그 칸을 맡은 고정 활동의 체험존 id.
+ * fixedCellNames 와 같은 순서(먼저 정의된 활동이 이긴다)로 계산해 이름·존이 어긋나지 않는다.
+ * 존이 지정된 활동의 칸만 담긴다.
+ */
+export function fixedCellRooms(data: AppData): Map<string, string> {
+  const map = new Map<string, string>();
+  const seen = new Set<string>();
+  for (const f of data.fixedActivities) {
+    for (const key of f.cells) {
+      const [d, p] = key.split(":").map(Number);
+      if (!(d >= 0 && d < data.days.length && p >= 0 && p < dayPeriods(data, d).length)) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (f.roomId) map.set(key, f.roomId);
+    }
+  }
+  return map;
+}
+
 /** ── 운영 구간 ─────────────────────────────────────────── */
 
 export function segmentOf(data: AppData, klass: Klass): Segment | null {
@@ -247,6 +267,7 @@ export function buildLectures(data: AppData): Lecture[] {
         teacherId: course.teacherId,
         classId,
         subject: course.subject || "(과목 미입력)",
+        teacherSubject: course.teacherSubject?.trim() || undefined,
         roomId: course.roomId,
         hours: course.hours,
         blocks: Math.max(0, Math.min(course.blocks, Math.floor(course.hours / 2))),
@@ -414,17 +435,31 @@ export function validate(data: AppData): Issue[] {
       });
   }
 
-  // 같은 체험반의 같은 프로그램은 하루 1회 → 배치 횟수가 그 반이 오는 요일 수를 넘으면 불가능
+  // 같은 체험반의 같은 프로그램은 하루 1회 → 그 반의 등원 요일 수를 넘게 배치되면 불가능.
+  // 같은 프로그램이 여러 강사 배정으로 나뉘어 있을 수 있으므로 (반, 프로그램)별로 합산한다.
   const classById = new Map(data.classes.map((c) => [c.id, c]));
+  const comboUnits = new Map<string, { classId: string; subject: string; count: number; courses: number }>();
   for (const lec of lectures) {
-    const klass = classById.get(lec.classId);
-    if (!klass) continue;
+    if (!classById.has(lec.classId)) continue;
+    const key = `${lec.classId}|${lec.subject}`;
+    const units = lec.blocks + (lec.hours - lec.blocks * 2);
+    const e = comboUnits.get(key) ?? { classId: lec.classId, subject: lec.subject, count: 0, courses: 0 };
+    e.count += units;
+    e.courses += 1;
+    comboUnits.set(key, e);
+  }
+  for (const e of comboUnits.values()) {
+    const klass = classById.get(e.classId)!;
     const dayCount = allowedDaysOf(data, klass).length;
-    const unitCount = lec.blocks + (lec.hours - lec.blocks * 2);
-    if (unitCount > dayCount)
+    if (e.count > dayCount)
       issues.push({
         level: "error",
-        text: `${klass.name} ${lec.subject}: 하루 1회 규칙 때문에 주 ${dayCount}회까지만 가능한데 ${unitCount}회가 필요합니다. 연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
+        text: `${klass.name} ${e.subject}: 같은 프로그램은 하루 1회만 진행하므로 주 ${dayCount}회까지 가능한데 ${e.count}회가 필요합니다. 연속 2교시(블록) 수를 늘리거나 시수를 줄이세요.`,
+      });
+    else if (e.courses > 1)
+      issues.push({
+        level: "warn",
+        text: `${klass.name} ${e.subject}: 같은 프로그램이 배정 ${e.courses}건으로 나뉘어 있습니다. 하루 1회 규칙에 걸릴 수 있으니 의도한 것인지 확인하세요.`,
       });
   }
 

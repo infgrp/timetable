@@ -212,4 +212,74 @@ await check("전체 예시 20회 배치·통합 보기 회귀", () => {
   assert(html.includes("빈 칸 0"));
 });
 
+await check("같은 반 동일 프로그램은 하루 1회 (여러 배정으로 나뉘어도)", () => {
+  const base: AppData = {
+    ...defaultData(), days: ["월", "화"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 3, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "D반", segmentId: "seg" }],
+    segments: [{ id: "seg", name: "월화", days: [0, 1] }],
+    teachers: [{ id: "T1", name: "강사1", unavailable: [] }, { id: "T2", name: "강사2", unavailable: [] }],
+    rooms: [],
+    courses: [
+      { id: "c1", teacherId: "T1", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null },
+      { id: "c2", teacherId: "T2", subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: null },
+    ], timetable: [],
+  };
+  // 두 배정이 같은 프로그램이라도 하루 1회 규칙으로 서로 다른 날에 놓인다.
+  for (let seed = 1; seed <= 5; seed++) {
+    const list = solved(base, seed);
+    const days = list.filter((a) => a.subject === "Adventure").map((a) => a.day);
+    assert.equal(days.length, 2);
+    assert.equal(new Set(days).size, 2);
+  }
+  // 손으로 같은 날 두 번 넣으면 중복 충돌로 잡힌다.
+  const dup = [
+    newAssignment({ classId: "K", subject: "Adventure", teacherId: "T1", day: 0, period: 0 }),
+    newAssignment({ classId: "K", subject: "Adventure", teacherId: "T2", day: 0, period: 1 }),
+  ];
+  assert(conflictsOf(base, dup).some((c) => c.kind === "duplicate"));
+  // 등원 요일이 하루뿐이면 배치가 불가능하므로 검증이 막는다.
+  const oneDay = { ...base, segments: [{ id: "seg", name: "월", days: [0] }] };
+  assert(validate(oneDay).some((i) => i.level === "error" && i.text.includes("하루 1회")));
+});
+
+await check("강사 시간표용 프로그램명 별도 표기", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 2, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "D반" }], rooms: [{ id: "R", name: "컬처룸" }],
+    teachers: [{ id: "T", name: "정하늘", unavailable: [] }],
+    courses: [{ id: "c", teacherId: "T", subject: "Adventure", teacherSubject: "Adventure ①", classIds: ["K"], hours: 1, blocks: 0, roomId: "R" }],
+    timetable: [],
+  };
+  const list = solved(data, 1);
+  assert.equal(list[0].teacherSubject, "Adventure ①");
+  const g = buildGrids(data, list);
+  const cls = g.byClass.get("K")![list[0].period][0];
+  const tea = g.byTeacher.get("T")![list[0].period][0];
+  const room = g.byRoom.get("R")![list[0].period][0];
+  assert(cls && cls !== "cont" && cls.top === "Adventure");
+  assert(tea && tea !== "cont" && tea.bottom!.includes("Adventure ①"));
+  assert(room && room !== "cont" && room.bottom!.includes("Adventure") && !room.bottom!.includes("①"));
+});
+
+await check("고정 활동 체험존은 그 존 시간표에도 나타남", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월"],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 3, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "D반" }], rooms: [{ id: "HALL", name: "강당" }, { id: "R2", name: "컬처룸" }],
+    teachers: [], courses: [], timetable: [],
+    fixedActivities: [
+      { id: "f", name: "Orientation", cells: ["0:0"], roomId: "HALL" },
+      { id: "f2", name: "Closing", cells: ["0:2"] },
+    ],
+  };
+  const g = buildGrids(data, []);
+  const hall = g.byRoom.get("HALL")![0][0];
+  assert(hall && hall !== "cont" && hall.fixed && hall.top === "Orientation");
+  // 존을 지정하지 않은 고정 활동은 어느 존 표에도 들어가지 않는다.
+  assert.equal(g.byRoom.get("R2")![2][0], null);
+  assert.equal(g.byRoom.get("HALL")![2][0], null);
+});
+
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);
