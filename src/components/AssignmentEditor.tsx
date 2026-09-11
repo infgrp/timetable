@@ -61,7 +61,7 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
           </datalist>
         </Field>
 
-        <Field label="강사">
+        <Field label="강사" hint="비워 두면 강사 칸이 빈 채로 나옵니다">
           <Select
             value={value.teacherId ?? ""}
             onChange={(e) => patch({ teacherId: e.target.value || null })}
@@ -73,6 +73,39 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
               </option>
             ))}
           </Select>
+        </Field>
+
+        <Field label="함께 들어가는 강사" hint="두 명 이상이 같이 맡는 칸이면 고릅니다">
+          <div className="flex flex-wrap gap-1 pt-1">
+            {data.teachers.filter((t) => t.id !== value.teacherId).length === 0 ? (
+              <span className="text-xs text-tt-500">고를 강사가 없습니다</span>
+            ) : (
+              data.teachers
+                .filter((t) => t.id !== value.teacherId)
+                .map((t) => {
+                  const on = (value.coTeacherIds ?? []).includes(t.id);
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        const next = on
+                          ? (value.coTeacherIds ?? []).filter((x) => x !== t.id)
+                          : [...(value.coTeacherIds ?? []), t.id];
+                        patch({ coTeacherIds: next.length > 0 ? next : undefined });
+                      }}
+                      className={`rounded border px-1.5 py-0.5 text-xs font-semibold ${
+                        on
+                          ? "border-tt-600 bg-tt-600 text-white"
+                          : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
+                      }`}
+                    >
+                      {t.name || "(이름없음)"}
+                    </button>
+                  );
+                })
+            )}
+          </div>
         </Field>
 
         <Field label="체험존">

@@ -286,12 +286,16 @@ export function buildLectures(data: AppData): Lecture[] {
   const out: Lecture[] = [];
   const classExists = new Set(data.classes.map((c) => c.id));
   for (const course of data.courses) {
-    if (!course.teacherId || course.hours <= 0) continue;
+    if (course.hours <= 0) continue;
+    const teacherExists = new Set(data.teachers.map((t) => t.id));
+    const co = (course.coTeacherIds ?? []).filter((id) => id && id !== course.teacherId && teacherExists.has(id));
     for (const classId of course.classIds) {
       if (!classExists.has(classId)) continue;
       out.push({
         courseId: course.id,
-        teacherId: course.teacherId,
+        // 빈 문자열이면 강사 미지정 — 자리는 잡되 누구의 시간도 쓰지 않는다.
+        teacherId: teacherExists.has(course.teacherId) ? course.teacherId : "",
+        coTeacherIds: co.length > 0 ? co : undefined,
         classId,
         subject: course.subject || "(과목 미입력)",
         teacherSubject: course.teacherSubject?.trim() || undefined,
@@ -471,7 +475,10 @@ export function validate(data: AppData): Issue[] {
 
   // 강사별 총 시수 vs 가용 칸
   const perTeacher = new Map<string, number>();
-  for (const lec of lectures) perTeacher.set(lec.teacherId, (perTeacher.get(lec.teacherId) ?? 0) + lec.hours);
+  // 미지정 칸은 누구의 시수도 아니다. 함께 들어가는 강사는 각자 그 시간을 쓴다.
+  for (const lec of lectures)
+    for (const id of [lec.teacherId, ...(lec.coTeacherIds ?? [])])
+      if (id) perTeacher.set(id, (perTeacher.get(id) ?? 0) + lec.hours);
   for (const t of data.teachers) {
     const h = perTeacher.get(t.id) ?? 0;
     // 고정 활동 칸은 이미 capacity 에서 빠졌으므로 회피 시간에서도 빼서 두 번 세지 않는다.

@@ -84,14 +84,27 @@ export function solve(
   const unitLec = new Int32Array(uLec);
   const unitLen = new Int32Array(uLen);
   const unitClass = new Int32Array(U);
-  const unitTeacher = new Int32Array(U);
   const unitRoom = new Int32Array(U);
+  // 한 칸에 강사가 0명(미지정)일 수도, 2명 이상(팀티칭)일 수도 있다.
+  // 뜨거운 반복문에서 배열을 새로 만들지 않도록 평평한 목록 + 시작/끝 색인으로 담는다.
+  const teacherList: number[] = [];
+  const unitTeacherStart = new Int32Array(U + 1);
   for (let u = 0; u < U; u++) {
     const lec = lectures[unitLec[u]];
     unitClass[u] = classIdx.get(lec.classId) ?? 0;
-    unitTeacher[u] = teacherIdx.get(lec.teacherId) ?? 0;
     unitRoom[u] = lec.roomId ? (roomIdx.get(lec.roomId) ?? -1) : -1;
+    unitTeacherStart[u] = teacherList.length;
+    const seen = new Set<number>();
+    for (const id of [lec.teacherId, ...(lec.coTeacherIds ?? [])]) {
+      if (!id) continue;
+      const ti = teacherIdx.get(id);
+      if (ti === undefined || seen.has(ti)) continue;
+      seen.add(ti);
+      teacherList.push(ti);
+    }
   }
+  unitTeacherStart[U] = teacherList.length;
+  const unitTeachers = new Int32Array(teacherList);
 
   const classUnits: number[][] = Array.from({ length: C }, () => []);
   for (let u = 0; u < U; u++) classUnits[unitClass[u]].push(u);
@@ -178,7 +191,8 @@ export function solve(
       const mask = lecDayMask[unitLec[u]];
       if (mask && !mask[(s / P) | 0]) return false;
       for (let k = 0; k < unitLen[u]; k++) {
-        if (req.reservedTeacherCells?.[unitTeacher[u]]?.[s + k]) return false;
+        for (let i = unitTeacherStart[u]; i < unitTeacherStart[u + 1]; i++)
+          if (req.reservedTeacherCells?.[unitTeachers[i]]?.[s + k]) return false;
         if (unitRoom[u] >= 0 && req.reservedRoomCells?.[unitRoom[u]]?.[s + k]) return false;
       }
       return true;
@@ -202,16 +216,20 @@ export function solve(
 
   const addUnit = (u: number, s: number) => {
     const c = unitClass[u];
-    const t = unitTeacher[u];
     const r = unitRoom[u];
+    const t0 = unitTeacherStart[u];
+    const t1 = unitTeacherStart[u + 1];
     const co = lecCombo[unitLec[u]];
     const len = unitLen[u];
     for (let k = 0; k < len; k++) {
       const q = s + k;
       cellOwner[c * S + q] = u;
-      if (teacherUse[t * S + q]++ >= 1) cost++;
+      for (let i = t0; i < t1; i++) {
+        const t = unitTeachers[i];
+        if (teacherUse[t * S + q]++ >= 1) cost++;
+        if (blockedFlat[t * S + q]) cost++;
+      }
       if (r >= 0 && roomUse[r * S + q]++ >= 1) cost++;
-      if (blockedFlat[t * S + q]) cost++;
     }
     if (comboDay[co * D + groupOfSlot(u, s)]++ >= 1) cost++;
     pos[u] = s;
@@ -222,16 +240,20 @@ export function solve(
     const s = pos[u];
     if (s < 0) return;
     const c = unitClass[u];
-    const t = unitTeacher[u];
     const r = unitRoom[u];
+    const t0 = unitTeacherStart[u];
+    const t1 = unitTeacherStart[u + 1];
     const co = lecCombo[unitLec[u]];
     const len = unitLen[u];
     for (let k = 0; k < len; k++) {
       const q = s + k;
       cellOwner[c * S + q] = -1;
-      if (--teacherUse[t * S + q] >= 1) cost--;
+      for (let i = t0; i < t1; i++) {
+        const t = unitTeachers[i];
+        if (--teacherUse[t * S + q] >= 1) cost--;
+        if (blockedFlat[t * S + q]) cost--;
+      }
       if (r >= 0 && --roomUse[r * S + q] >= 1) cost--;
-      if (blockedFlat[t * S + q]) cost--;
     }
     if (--comboDay[co * D + groupOfSlot(u, s)] >= 1) cost--;
     pos[u] = -1;
@@ -241,15 +263,19 @@ export function solve(
   const conflictOf = (u: number): number => {
     const s = pos[u];
     if (s < 0) return UNPLACED_PENALTY;
-    const t = unitTeacher[u];
     const r = unitRoom[u];
+    const t0 = unitTeacherStart[u];
+    const t1 = unitTeacherStart[u + 1];
     const len = unitLen[u];
     let n = 0;
     for (let k = 0; k < len; k++) {
       const q = s + k;
-      if (teacherUse[t * S + q] > 1) n++;
+      for (let i = t0; i < t1; i++) {
+        const t = unitTeachers[i];
+        if (teacherUse[t * S + q] > 1) n++;
+        if (blockedFlat[t * S + q]) n++;
+      }
       if (r >= 0 && roomUse[r * S + q] > 1) n++;
-      if (blockedFlat[t * S + q]) n++;
     }
     if (comboDay[lecCombo[unitLec[u]] * D + groupOfSlot(u, s)] > 1) n++;
     return n;
@@ -551,7 +577,8 @@ export function solve(
       }
       entry.hours += len;
 
-      const t = unitTeacher[u];
+      const t0 = unitTeacherStart[u];
+      const t1 = unitTeacherStart[u + 1];
       const c = unitClass[u];
       const r = unitRoom[u];
       const list = startsFor(u);
@@ -565,9 +592,13 @@ export function solve(
         let hit = -1;
         for (let k = 0; k < len && hit < 0; k++) {
           const q = s + k;
-          if (blockedFlat[t * S + q]) hit = 0;
-          else if (teacherUse[t * S + q] > 0 || req.reservedTeacherCells?.[t]?.[q]) hit = 1;
-          else if (cellOwner[c * S + q] >= 0) hit = 2;
+          for (let i = t0; i < t1 && hit < 0; i++) {
+            const t = unitTeachers[i];
+            if (blockedFlat[t * S + q]) hit = 0;
+            else if (teacherUse[t * S + q] > 0 || req.reservedTeacherCells?.[t]?.[q]) hit = 1;
+          }
+          if (hit >= 0) break;
+          if (cellOwner[c * S + q] >= 0) hit = 2;
           else if (r >= 0 && (roomUse[r * S + q] > 0 || req.reservedRoomCells?.[r]?.[q])) hit = 3;
         }
         if (hit >= 0) entry.counts[hit]++;

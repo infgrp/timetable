@@ -622,6 +622,20 @@ export default function ResultPanel({ data, set }: Props) {
         </>
       )}
 
+      {/* 고른 구분에 대상이 하나도 없으면 빈 화면 대신 무엇을 해야 하는지 알린다.
+          강사를 등록하기 전에 [강사별]을 누르면 표가 하나도 안 나와 막막했다. */}
+      {(hasTimetable || editing) && viewTargets.length === 0 && (
+        <Empty>
+          {view === "teacher"
+            ? "등록된 강사가 없습니다. [강사] 탭에서 강사를 추가하면 강사별 시간표가 여기에 나옵니다."
+            : view === "room"
+              ? "등록된 체험존이 없습니다. [체험반·구간] 탭에서 추가하세요."
+              : segment
+                ? "이 구간에 오는 체험반이 없습니다. [체험반·구간] 탭에서 반의 구간을 확인하세요."
+                : "등록된 체험반이 없습니다. [체험반·구간] 탭에서 추가하세요."}
+        </Empty>
+      )}
+
       {(hasTimetable || editing) && (
         <div className="grid gap-5 xl:grid-cols-2">
           {viewTargets.map((x) => {

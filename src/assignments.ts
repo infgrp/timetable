@@ -10,6 +10,17 @@ import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
 import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
 
+/**
+ * 이 칸에 묶인 강사 id 전부 (주 담당 + 함께 들어가는 강사).
+ * 강사를 아직 정하지 않은 칸은 빈 배열이다.
+ */
+export function teachersOf(a: Assignment): string[] {
+  const out: string[] = [];
+  for (const id of [a.teacherId, ...(a.coTeacherIds ?? [])])
+    if (id && !out.includes(id)) out.push(id);
+  return out;
+}
+
 export function newAssignment(init: Partial<Assignment> = {}): Assignment {
   return {
     id: uid("a"),
@@ -33,7 +44,8 @@ export function fromSolveResult(result: SolveResult, lectures: Lecture[]): Assig
     out.push(
       newAssignment({
         classId: lec.classId,
-        teacherId: lec.teacherId,
+        teacherId: lec.teacherId || null,
+        coTeacherIds: lec.coTeacherIds,
         roomId: lec.roomId,
         subject: lec.subject,
         teacherSubject: lec.teacherSubject,
@@ -207,7 +219,7 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   for (const a of usable) {
     for (const p of periodsCovered(a)) {
       bucket(byClass, `${a.classId}|${a.day}|${p}`, a);
-      if (a.teacherId) bucket(byTeacher, `${a.teacherId}|${a.day}|${p}`, a);
+      for (const tid of teachersOf(a)) bucket(byTeacher, `${tid}|${a.day}|${p}`, a);
       if (a.roomId) bucket(byRoom, `${a.roomId}|${a.day}|${p}`, a);
     }
   }
@@ -272,18 +284,19 @@ export function conflictsOf(data: AppData, list: Assignment[]): Conflict[] {
   // 강사 회피 시간
   const avoid = new Map(data.teachers.map((t) => [t.id, new Set(t.unavailable)]));
   for (const a of usable) {
-    if (!a.teacherId) continue;
-    const blocked = avoid.get(a.teacherId);
-    if (!blocked) continue;
-    const hit = periodsCovered(a).find((p) => blocked.has(slotKey(a.day, p)));
-    if (hit === undefined) continue;
-    out.push({
-      kind: "avoid",
-      text: `${teacherName.get(a.teacherId) ?? "?"} — ${at(a.day, hit)}는 회피 시간인데 ${
-        a.subject || "(프로그램 미입력)"
-      }이(가) 잡혀 있습니다.`,
-      ids: [a.id],
-    });
+    for (const tid of teachersOf(a)) {
+      const blocked = avoid.get(tid);
+      if (!blocked) continue;
+      const hit = periodsCovered(a).find((p) => blocked.has(slotKey(a.day, p)));
+      if (hit === undefined) continue;
+      out.push({
+        kind: "avoid",
+        text: `${teacherName.get(tid) ?? "?"} — ${at(a.day, hit)}는 회피 시간인데 ${
+          a.subject || "(프로그램 미입력)"
+        }이(가) 잡혀 있습니다.`,
+        ids: [a.id],
+      });
+    }
   }
 
   return out;
@@ -319,7 +332,11 @@ export function draftForOwner(
   if (free.length === 0) return null;
 
   // 이 강사(존)의 배정 중, 아직 시수가 남은 반을 먼저 본다.
-  const mine = data.courses.filter((c) => (axis === "teacher" ? c.teacherId === ownerId : c.roomId === ownerId));
+  const mine = data.courses.filter((c) =>
+    axis === "teacher"
+      ? c.teacherId === ownerId || (c.coTeacherIds ?? []).includes(ownerId)
+      : c.roomId === ownerId,
+  );
   const placed = (classId: string, subject: string) =>
     list.filter((a) => a.classId === classId && a.subject === subject).reduce((n, a) => n + a.length, 0);
 
@@ -331,6 +348,7 @@ export function draftForOwner(
     return {
       classId: klass.id,
       teacherId: course.teacherId || null,
+      coTeacherIds: course.coTeacherIds?.length ? [...course.coTeacherIds] : undefined,
       roomId: course.roomId ?? programRoomOf(data, course.subject) ?? (axis === "room" ? ownerId : null),
       subject: course.subject,
       teacherSubject: course.teacherSubject?.trim() || undefined,
@@ -433,7 +451,9 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
   for (const a of list) {
     if (a.day < 0 || a.day >= data.days.length) continue;
     const room = a.roomId ? roomName.get(a.roomId) : undefined;
-    const teacher = a.teacherId ? teacherName.get(a.teacherId) : undefined;
+    // 함께 들어가는 강사가 있으면 반·존 표에 나란히 적는다.
+    const names = teachersOf(a).map((id) => teacherName.get(id) ?? "(삭제된 강사)");
+    const teacher = names.length > 0 ? names.join(" · ") : undefined;
     // 매주 담당이 바뀌는 수업은 체험반·체험존 표에 강사를 적지 않는다.
     const shownTeacher = a.hideTeacher ? undefined : teacher;
     const hue = hueOf(a.subject);
@@ -445,8 +465,8 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
       top: a.subject || "(프로그램 미입력)",
       bottom: [shownTeacher, room].filter(Boolean).join(" · "),
     });
-    if (a.teacherId)
-      put(byTeacher.get(a.teacherId), a, {
+    for (const tid of teachersOf(a))
+      put(byTeacher.get(tid), a, {
         ...base,
         top: className.get(a.classId) ?? "(삭제된 체험반)",
         // 강사 개인 표에는 teacherSubject(예: "Adventure ①")를 우선 쓴다.

@@ -7,6 +7,8 @@ type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
 
 export default function CoursesPanel({ data, set }: Props) {
   const [openRow, setOpenRow] = useState<string | null>(null);
+  // 함께 들어가는 강사(팀티칭)를 고르는 줄. 자주 쓰지 않으니 눌러야 펼친다.
+  const [coRow, setCoRow] = useState<string | null>(null);
   // 구간 탭: null = 전체, 그 외에는 Segment.id. 월·화반과 수·목·금반의 과목 구성이 다를 때 나눠 본다.
   const [segTab, setSegTab] = useState<string | null>(null);
 
@@ -114,7 +116,7 @@ export default function CoursesPanel({ data, set }: Props) {
     <div className="flex flex-col gap-5">
       <Card
         title={`프로그램 배정 (${data.courses.length}건)`}
-        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다. 같은 반의 같은 프로그램은 하루에 한 번만 배치되며, 요일이 정해진 과목은 [지정 요일]을 켜세요."
+        desc="한 줄 = 한 강사가 한 프로그램을 여러 체험반에 맡는 배정입니다. 강사를 비워 두면 자리만 잡고 나중에 채울 수 있고, 두 강사가 같이 들어가면 [함께 들어가는 강사]로 묶습니다. 시수와 연속 2교시 횟수는 체험반마다 각각 적용됩니다. 같은 반의 같은 프로그램은 하루에 한 번만 배치되며, 요일이 정해진 과목은 [지정 요일]을 켜세요."
         right={
           <Button variant="primary" onClick={addCourse}>
             + 배정 추가
@@ -155,7 +157,7 @@ export default function CoursesPanel({ data, set }: Props) {
             <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="border-b border-tt-200 text-left text-xs font-semibold text-tt-600">
-                  <th className="w-40 py-2">강사</th>
+                  <th className="w-40 py-2" title="비워 두면 자리는 잡되 강사 칸이 빈 채로 나옵니다. 두 명 이상이 함께 맡으면 [+ 함께 들어가는 강사]로 고르세요.">강사</th>
                   <th className="w-44 py-2">프로그램</th>
                   <th className="py-2">체험반</th>
                   <th className="w-24 py-2">주당 시수</th>
@@ -184,13 +186,55 @@ export default function CoursesPanel({ data, set }: Props) {
                           value={c.teacherId}
                           onChange={(e) => patch(c.id, { teacherId: e.target.value })}
                         >
-                          <option value="">— 선택 —</option>
+                          <option value="">— 미지정 (나중에 채움) —</option>
                           {data.teachers.map((t) => (
                             <option key={t.id} value={t.id}>
                               {t.name || "(이름없음)"}
                             </option>
                           ))}
                         </Select>
+                        {data.teachers.length > 1 && (
+                          <div className="mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setCoRow(coRow === c.id ? null : c.id)}
+                              className="text-[11px] font-semibold text-tt-600 underline-offset-2 hover:underline"
+                            >
+                              {(c.coTeacherIds ?? []).length > 0
+                                ? `함께 ${(c.coTeacherIds ?? []).length}명`
+                                : "+ 함께 들어가는 강사"}
+                            </button>
+                            {coRow === c.id && (
+                              <div className="mt-1 flex flex-wrap gap-1 rounded-lg border border-tt-200 bg-tt-50 p-1.5">
+                                {data.teachers
+                                  .filter((t) => t.id !== c.teacherId)
+                                  .map((t) => {
+                                    const on = (c.coTeacherIds ?? []).includes(t.id);
+                                    return (
+                                      <button
+                                        key={t.id}
+                                        type="button"
+                                        onClick={() =>
+                                          patch(c.id, {
+                                            coTeacherIds: on
+                                              ? (c.coTeacherIds ?? []).filter((x) => x !== t.id)
+                                              : [...(c.coTeacherIds ?? []), t.id],
+                                          })
+                                        }
+                                        className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${
+                                          on
+                                            ? "border-tt-600 bg-tt-600 text-white"
+                                            : "border-tt-300 bg-white text-tt-600 hover:bg-white"
+                                        }`}
+                                      >
+                                        {t.name || "(이름없음)"}
+                                      </button>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="py-1.5 pr-2">
                         <TextInput

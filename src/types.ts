@@ -103,7 +103,17 @@ export type Teacher = {
  */
 export type Course = {
   id: string;
+  /**
+   * 주 담당 강사. 빈 문자열이면 **아직 정하지 않은 것**이라 배치는 하되 강사 칸을 비워 둔다.
+   * 매주 담당이 바뀌는 Adventure 처럼, 먼저 자리를 잡고 나중에 손으로 채우는 운영에 쓴다.
+   */
   teacherId: string;
+  /**
+   * 같은 칸에 함께 들어가는 강사들 (팀티칭).
+   * 한 프로그램을 두 강사가 같은 요일·교시에 같이 맡을 때 쓴다.
+   * 이 강사들의 시간도 함께 막히므로 다른 수업과 겹치지 않는다.
+   */
+  coTeacherIds?: string[];
   subject: string;
   /**
    * 강사 개인 시간표에만 쓰는 다른 표시명 (비우면 subject 를 그대로 쓴다).
@@ -145,7 +155,10 @@ export type Course = {
 export type Assignment = {
   id: string;
   classId: string;
+  /** 주 담당 강사. null 이면 아직 정하지 않은 칸이다. */
   teacherId: string | null;
+  /** 같은 칸에 함께 들어가는 강사들 (Course.coTeacherIds 를 물려받는다) */
+  coTeacherIds?: string[];
   roomId: string | null;
   subject: string;
   /** 강사 개인 시간표용 표시명 (Course.teacherSubject 를 물려받는다). 비면 subject 사용. */
@@ -221,7 +234,10 @@ export type AppData = {
 export type Lecture = {
   /** 원본 Course id */
   courseId: string;
+  /** 빈 문자열이면 강사 미지정 — 어느 강사의 시간도 쓰지 않는다. */
   teacherId: string;
+  /** 함께 들어가는 강사들. 이들의 시간도 같이 막는다. */
+  coTeacherIds?: string[];
   classId: string;
   subject: string;
   teacherSubject?: string;

@@ -20,7 +20,8 @@ const AXIS_LABEL: Record<Axis, string> = { class: "체험반", teacher: "강사"
  */
 export default function ViewerPanel({ data, onBuild }: Props) {
   const [axis, setAxis] = useState<Axis>("class");
-  const [pickedId, setPickedId] = useState<string>("");
+  // 빈 배열이면 전체 보기. 여러 반을 골라 나란히 놓고 보려는 요청(2026-09-11).
+  const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [segId, setSegId] = useState("");
 
   const grids = useMemo(() => buildGrids(data, data.timetable), [data]);
@@ -70,8 +71,11 @@ export default function ViewerPanel({ data, onBuild }: Props) {
   const titleFor = (name: string) =>
     `${axis === "teacher" ? `${name} 강사` : `${head}${name}`}${segSuffix}`;
 
-  const activePickedId = targets.some((t) => t.id === pickedId) ? pickedId : "";
-  const shown = activePickedId ? targets.filter((t) => t.id === activePickedId) : targets;
+  // 지운 대상이 골라진 채 남지 않게 지금 목록에 있는 것만 센다.
+  const picked = pickedIds.filter((id) => targets.some((t) => t.id === id));
+  const shown = picked.length > 0 ? targets.filter((t) => picked.includes(t.id)) : targets;
+  const toggle = (id: string) =>
+    setPickedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
 
   const download = () => {
     if (shown.length === 0) return;
@@ -89,7 +93,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
         bands: mergedOf(t.id)?.bands,
       });
     });
-    const label = activePickedId ? shown[0].name : `${AXIS_LABEL[axis]}별`;
+    const label = shown.length === 1 ? shown[0].name : picked.length > 0 ? `${AXIS_LABEL[axis]} ${shown.length}개` : `${AXIS_LABEL[axis]}별`;
     downloadBlob(`${safeFileName(`${data.schoolName || "시간표"} ${label}${segSuffix}`)}.xlsx`, buildXlsx(sheets));
   };
 
@@ -118,7 +122,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
                 disabled={a === "room" && data.rooms.length === 0}
                 onClick={() => {
                   setAxis(a);
-                  setPickedId("");
+                  setPickedIds([]);
                 }}
               >
                 {AXIS_LABEL[a]}별
@@ -133,11 +137,11 @@ export default function ViewerPanel({ data, onBuild }: Props) {
           {data.segments.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-semibold text-tt-700">구간</span>
-              <Button variant={segId === "" ? "primary" : "ghost"} onClick={() => { setSegId(""); setPickedId(""); }}>
+              <Button variant={segId === "" ? "primary" : "ghost"} onClick={() => { setSegId(""); setPickedIds([]); }}>
                 전체 ({data.days.join("")})
               </Button>
               {data.segments.map((s) => (
-                <Button key={s.id} variant={segId === s.id ? "primary" : "ghost"} onClick={() => { setSegId(s.id); setPickedId(""); }}>
+                <Button key={s.id} variant={segId === s.id ? "primary" : "ghost"} onClick={() => { setSegId(s.id); setPickedIds([]); }}>
                   {s.name || "(이름없음)"}
                 </Button>
               ))}
@@ -146,11 +150,14 @@ export default function ViewerPanel({ data, onBuild }: Props) {
 
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="mr-1 text-xs font-semibold text-tt-700">{AXIS_LABEL[axis]}</span>
+            {picked.length > 1 && (
+              <span className="mr-1 text-xs text-tt-500">{picked.length}개 선택</span>
+            )}
             <button
               type="button"
-              onClick={() => setPickedId("")}
+              onClick={() => setPickedIds([])}
               className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                activePickedId === ""
+                picked.length === 0
                   ? "border-tt-600 bg-tt-600 text-white"
                   : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
               }`}
@@ -161,9 +168,9 @@ export default function ViewerPanel({ data, onBuild }: Props) {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setPickedId(t.id)}
+                onClick={() => toggle(t.id)}
                 className={`rounded-md border px-2.5 py-1 text-xs font-semibold transition ${
-                  activePickedId === t.id
+                  picked.includes(t.id)
                     ? "border-tt-600 bg-tt-600 text-white"
                     : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
                 }`}
@@ -187,7 +194,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
       ) : targets.length === 0 ? (
         <Empty>이 구간에 해당하는 {AXIS_LABEL[axis]}이(가) 없습니다.</Empty>
       ) : (
-        <div className={`grid gap-5 ${activePickedId ? "" : "xl:grid-cols-2"}`}>
+        <div className={`grid gap-5 ${shown.length === 1 ? "" : "xl:grid-cols-2"}`}>
           {shown.map((t) => {
             const merged = mergedOf(t.id);
             const g = gridOf(t.id);

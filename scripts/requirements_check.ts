@@ -497,4 +497,98 @@ await check("합본 시간표: 구간이 다른 두 반을 한 장으로", () =>
   assert.equal(mergedGrid(sameSeg, grids, ["A", "C"], [0, 1]).overlap, true);
 });
 
+await check("강사를 비워 둔 배정도 자리를 잡는다 (나중에 손으로 채움)", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월", "화"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 2, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "TEAM A" }], rooms: [], segments: [],
+    teachers: [{ id: "T", name: "정하늘", unavailable: [] }],
+    courses: [
+      // Adventure 는 담당이 매주 바뀌어 지금은 비워 둔다.
+      { id: "adv", teacherId: "", subject: "Adventure", classIds: ["K"], hours: 2, blocks: 0, roomId: null },
+      { id: "hr", teacherId: "T", subject: "Homeroom", classIds: ["K"], hours: 2, blocks: 0, roomId: null },
+    ],
+    timetable: [],
+  };
+  // 예전에는 강사가 없는 배정을 통째로 건너뛰어 시수조차 세지 않았다.
+  const lectures = buildLectures(data);
+  assert.equal(lectures.length, 2);
+  assert.equal(lectures.find((l) => l.subject === "Adventure")!.teacherId, "");
+  assert.equal(validate(data).filter((i) => i.level === "error").length, 0);
+
+  for (let seed = 1; seed <= 5; seed++) {
+    const list = solved(data, seed);
+    assert.equal(list.reduce((n, a) => n + a.length, 0), 4);
+    const adv = list.filter((a) => a.subject === "Adventure");
+    assert.equal(adv.length, 2);
+    // 강사 칸은 비어 있고, 어느 강사의 시간도 잡아먹지 않는다.
+    assert(adv.every((a) => a.teacherId === null));
+    const grids = buildGrids(data, list);
+    const mine = grids.byTeacher.get("T")!.flat().filter((c) => c && c !== "cont");
+    assert.equal(mine.length, 2);   // Homeroom 두 칸만
+  }
+
+  // 미지정 칸이 같은 교시에 둘 있어도 강사 겹침으로 잡지 않는다.
+  const two = [
+    newAssignment({ classId: "K", subject: "Adventure", day: 0, period: 0 }),
+    newAssignment({ classId: "K2", subject: "Adventure", day: 0, period: 0 }),
+  ];
+  const twoClasses = { ...data, classes: [...data.classes, { id: "K2", name: "TEAM B" }] };
+  assert.equal(conflictsOf(twoClasses, two).filter((c) => c.kind === "teacher").length, 0);
+});
+
+await check("두 강사가 한 프로그램을 같은 칸에서 함께 맡는다", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월", "화"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 2, lunchAfter: 0 }),
+    classes: [{ id: "K", name: "TEAM A" }], rooms: [{ id: "R", name: "컬처룸" }], segments: [],
+    teachers: [
+      { id: "T1", name: "정하늘", unavailable: [] },
+      { id: "T2", name: "박세계", unavailable: [] },
+      { id: "T3", name: "김지영", unavailable: [] },
+    ],
+    courses: [
+      { id: "adv", teacherId: "T1", coTeacherIds: ["T2"], subject: "Adventure", classIds: ["K"], hours: 1, blocks: 0, roomId: "R" },
+      { id: "hr", teacherId: "T3", subject: "Homeroom", classIds: ["K"], hours: 2, blocks: 0, roomId: null },
+    ],
+    timetable: [],
+  };
+  const lec = buildLectures(data).find((l) => l.subject === "Adventure")!;
+  assert.deepEqual(lec.coTeacherIds, ["T2"]);
+  // 함께 들어가는 강사도 그 시간을 쓰므로 시수에 잡힌다.
+  assert.equal(validate(data).filter((i) => i.level === "error").length, 0);
+
+  for (let seed = 1; seed <= 5; seed++) {
+    const list = solved(data, seed);
+    const adv = list.find((a) => a.subject === "Adventure")!;
+    assert.equal(adv.teacherId, "T1");
+    assert.deepEqual(adv.coTeacherIds, ["T2"]);
+    // 한 칸이 두 강사의 표에 동시에 나타난다 — 같은 요일·교시로.
+    const grids = buildGrids(data, list);
+    const cell1 = grids.byTeacher.get("T1")![adv.period][adv.day];
+    const cell2 = grids.byTeacher.get("T2")![adv.period][adv.day];
+    assert(cell1 && cell1 !== "cont" && cell2 && cell2 !== "cont");
+    assert.equal(cell1.top, "TEAM A");
+    assert.equal(cell2.top, "TEAM A");
+    // 체험반 표에는 두 이름이 함께 적힌다.
+    const klass = grids.byClass.get("K")![adv.period][adv.day];
+    assert(klass && klass !== "cont" && klass.bottom!.includes("정하늘") && klass.bottom!.includes("박세계"));
+    // 함께 맡는 것은 겹침이 아니다.
+    assert.deepEqual(conflictsOf(data, list), []);
+  }
+
+  // 함께 들어가는 강사가 그 시간에 다른 반을 맡고 있으면 겹침으로 잡는다.
+  const clash = [
+    newAssignment({ classId: "K", subject: "Adventure", teacherId: "T1", coTeacherIds: ["T2"], day: 0, period: 0 }),
+    newAssignment({ classId: "K2", subject: "Other", teacherId: "T2", day: 0, period: 0 }),
+  ];
+  const withB = { ...data, classes: [...data.classes, { id: "K2", name: "TEAM B" }] };
+  assert(conflictsOf(withB, clash).some((c) => c.kind === "teacher" && c.text.includes("박세계")));
+
+  // 함께 들어가는 강사의 회피 시간도 지켜야 한다.
+  const avoidData = { ...data, teachers: data.teachers.map((t) => (t.id === "T2" ? { ...t, unavailable: ["0:0"] } : t)) };
+  const onAvoid = [newAssignment({ classId: "K", subject: "Adventure", teacherId: "T1", coTeacherIds: ["T2"], day: 0, period: 0 })];
+  assert(conflictsOf(avoidData, onAvoid).some((c) => c.kind === "avoid" && c.text.includes("박세계")));
+});
+
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);
