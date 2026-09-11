@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildLectures, defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, comboLimitOf, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, programRoomOf, validate, migrate } from "../src/store";
 import { calendarPeriods, changeDays, changeSlots, dayPeriods, scopeData, mergeSolved } from "../src/calendar";
-import { buildGrids, conflictsOf, draftForOwner, fits, fromSolveResult, mergedGrid, newAssignment } from "../src/assignments";
+import { buildGrids, conflictsOf, draftForOwner, fits, freeTeachersAt, fromSolveResult, mergedGrid, newAssignment, periodsCovered, teacherBusyAt } from "../src/assignments";
 import { sampleData } from "../src/sample";
 import { solve } from "../src/solver";
 import { applyRotation, previewRotation, previewUndo, rotateAssignments, undoRotation } from "../src/rotation";
@@ -589,6 +589,44 @@ await check("두 강사가 한 프로그램을 같은 칸에서 함께 맡는다
   const avoidData = { ...data, teachers: data.teachers.map((t) => (t.id === "T2" ? { ...t, unavailable: ["0:0"] } : t)) };
   const onAvoid = [newAssignment({ classId: "K", subject: "Adventure", teacherId: "T1", coTeacherIds: ["T2"], day: 0, period: 0 })];
   assert(conflictsOf(avoidData, onAvoid).some((c) => c.kind === "avoid" && c.text.includes("박세계")));
+});
+
+await check("미지정 칸에 넣을 수 있는 강사만 고르게 한다", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 3, lunchAfter: 0 }),
+    classes: [{ id: "K1", name: "TEAM A" }, { id: "K2", name: "TEAM B" }],
+    rooms: [], segments: [],
+    teachers: [
+      { id: "T1", name: "정하늘", unavailable: [] },
+      { id: "T2", name: "박세계", unavailable: [] },
+      { id: "T3", name: "김지영", unavailable: ["0:0"] },   // 월 1교시 회피
+      { id: "T4", name: "한도윤", unavailable: [] },
+    ],
+    courses: [], timetable: [],
+  };
+  // 월 1교시: T2 는 다른 반 수업 중, T3 는 회피 시간, T4 는 그 시간 함께 들어가 있음.
+  const list = [
+    newAssignment({ id: "free", classId: "K1", subject: "Adventure", day: 0, period: 0 }),
+    newAssignment({ id: "busy", classId: "K2", subject: "Homeroom", teacherId: "T2", coTeacherIds: ["T4"], day: 0, period: 0 }),
+  ];
+  const target = list[0];
+  assert.equal(teacherBusyAt(data, list, "T1", 0, [0]), null);
+  assert.equal(teacherBusyAt(data, list, "T2", 0, [0]), "TEAM B Homeroom");
+  assert.equal(teacherBusyAt(data, list, "T3", 0, [0]), "회피 시간");
+  // 함께 들어가는 강사도 그 시간에 묶여 있다.
+  assert.equal(teacherBusyAt(data, list, "T4", 0, [0]), "TEAM B Homeroom");
+  // 자기 자신과는 겹쳤다고 보지 않는다 (고치는 중인 칸).
+  assert.equal(teacherBusyAt(data, list, "T2", 0, [0], "busy"), null);
+
+  assert.deepEqual(freeTeachersAt(data, list, target.day, periodsCovered(target), target.id), ["T1"]);
+  // 2교시는 아무도 묶여 있지 않다.
+  assert.deepEqual(freeTeachersAt(data, list, 0, [1]), ["T1", "T2", "T3", "T4"]);
+
+  // 연속 2교시 칸은 두 교시 모두 비어야 한다.
+  const block = newAssignment({ id: "blk", classId: "K1", subject: "Adventure", day: 0, period: 0, length: 2 });
+  const busyAtSecond = [newAssignment({ classId: "K2", subject: "X", teacherId: "T1", day: 0, period: 1 })];
+  assert.equal(teacherBusyAt(data, busyAtSecond, "T1", 0, periodsCovered(block), "blk"), "TEAM B X");
 });
 
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);

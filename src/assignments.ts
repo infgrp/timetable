@@ -21,6 +21,48 @@ export function teachersOf(a: Assignment): string[] {
   return out;
 }
 
+/**
+ * 그 자리에 이 강사를 넣을 수 없는 이유. 넣어도 되면 null.
+ *
+ * 강사를 나중에 채우는 칸(Adventure 등)에서 잘못 고르는 것을 미리 막으려고 쓴다.
+ * exceptId 는 지금 고치고 있는 칸 — 자기 자신과는 겹쳤다고 보지 않는다.
+ */
+export function teacherBusyAt(
+  data: AppData,
+  list: Assignment[],
+  teacherId: string,
+  day: number,
+  periods: number[],
+  exceptId?: string,
+): string | null {
+  if (!teacherId) return null;
+  const teacher = data.teachers.find((t) => t.id === teacherId);
+  if (teacher && periods.some((p) => teacher.unavailable.includes(slotKey(day, p)))) return "회피 시간";
+  const hit = list.find(
+    (a) =>
+      a.id !== exceptId &&
+      a.day === day &&
+      teachersOf(a).includes(teacherId) &&
+      periodsCovered(a).some((p) => periods.includes(p)),
+  );
+  if (!hit) return null;
+  const name = data.classes.find((c) => c.id === hit.classId)?.name || "다른 반";
+  return `${name}${hit.subject ? ` ${hit.subject}` : ""}`;
+}
+
+/** 그 자리에 바로 넣을 수 있는 강사만. 목록 순서는 등록 순서를 따른다. */
+export function freeTeachersAt(
+  data: AppData,
+  list: Assignment[],
+  day: number,
+  periods: number[],
+  exceptId?: string,
+): string[] {
+  return data.teachers
+    .filter((t) => !teacherBusyAt(data, list, t.id, day, periods, exceptId))
+    .map((t) => t.id);
+}
+
 export function newAssignment(init: Partial<Assignment> = {}): Assignment {
   return {
     id: uid("a"),

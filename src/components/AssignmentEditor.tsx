@@ -1,5 +1,5 @@
 import type { AppData, Assignment } from "../types";
-import { fits, knownSubjects } from "../assignments";
+import { fits, knownSubjects, periodsCovered, teacherBusyAt } from "../assignments";
 import { dayPeriods } from "../calendar";
 import { programRoomMap } from "../store";
 import { Button, Field, Select, TextInput } from "./ui";
@@ -22,6 +22,9 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
     patch(linked ? { subject, roomId: linked } : { subject });
   };
   const canBlock = fits(data, value.day, value.period, 2);
+  // 이 자리에 이미 묶여 있는 강사는 고르기 전에 이유를 보여 준다.
+  const busy = (id: string) =>
+    teacherBusyAt(data, data.timetable, id, value.day, periodsCovered(value), value.id);
 
   return (
     <div className="rounded-xl border border-tt-400 bg-tt-50 p-4">
@@ -67,11 +70,15 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
             onChange={(e) => patch({ teacherId: e.target.value || null })}
           >
             <option value="">(미지정)</option>
-            {data.teachers.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name || "(이름없음)"}
-              </option>
-            ))}
+            {data.teachers.map((t) => {
+              const why = busy(t.id);
+              return (
+                <option key={t.id} value={t.id}>
+                  {t.name || "(이름없음)"}
+                  {why ? ` — ${why}` : ""}
+                </option>
+              );
+            })}
           </Select>
         </Field>
 
@@ -84,10 +91,12 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
                 .filter((t) => t.id !== value.teacherId)
                 .map((t) => {
                   const on = (value.coTeacherIds ?? []).includes(t.id);
+                  const why = busy(t.id);
                   return (
                     <button
                       key={t.id}
                       type="button"
+                      title={why ? `이 시간에 ${why}` : undefined}
                       onClick={() => {
                         const next = on
                           ? (value.coTeacherIds ?? []).filter((x) => x !== t.id)
@@ -97,10 +106,13 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
                       className={`rounded border px-1.5 py-0.5 text-xs font-semibold ${
                         on
                           ? "border-tt-600 bg-tt-600 text-white"
-                          : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
+                          : why
+                            ? "border-amber-300 bg-amber-50 text-amber-700"
+                            : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
                       }`}
                     >
                       {t.name || "(이름없음)"}
+                      {why ? " ⚠" : ""}
                     </button>
                   );
                 })
@@ -171,6 +183,18 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
           </label>
         </Field>
       </div>
+
+      {(() => {
+        const clash = [value.teacherId, ...(value.coTeacherIds ?? [])]
+          .filter((id): id is string => Boolean(id))
+          .map((id) => ({ name: data.teachers.find((t) => t.id === id)?.name || "?", why: busy(id) }))
+          .filter((x) => x.why);
+        return clash.length === 0 ? null : (
+          <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs font-semibold text-amber-800">
+            {clash.map((c) => `${c.name} — 이 시간에 ${c.why}`).join(" · ")}
+          </p>
+        );
+      })()}
 
       {value.hideTeacher && (
         <p className="mt-3 rounded-lg border border-tt-200 bg-white p-2.5 text-xs text-tt-600">

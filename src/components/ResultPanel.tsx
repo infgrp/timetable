@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppData, Assignment, Lecture, SolveResult, WorkerOut } from "../types";
 import { allowedDaysOf, buildSolveRequest, capacityForDays, validate } from "../store";
-import { mergeSolved, scopeData } from "../calendar";
+import { calendarPeriods, mergeSolved, scopeData } from "../calendar";
 import { downloadBlob, downloadText, safeFileName, toCsv } from "../export";
 import { buildXlsx } from "../xlsx";
 import type { XSheet } from "../xlsx";
@@ -15,6 +15,7 @@ import {
   dayAllowedFor,
   draftForOwner,
   fits,
+  freeTeachersAt,
   fromSolveResult,
   mergedGrid,
   newAssignment,
@@ -330,6 +331,24 @@ export default function ResultPanel({ data, set }: Props) {
     );
   };
 
+  /**
+   * 강사를 아직 정하지 않은 칸 — Adventure 처럼 먼저 돌리고 나중에 채우는 운영에서 쓴다.
+   * 강사가 없는 칸은 어느 강사의 표에도 나타나지 않으므로, 여기 모아 두고 바로 채운다.
+   */
+  const unassigned = useMemo(
+    () =>
+      data.timetable
+        .filter((a) => !a.teacherId && (a.coTeacherIds ?? []).length === 0)
+        .filter((a) => viewDays.includes(a.day)),
+    [data.timetable, viewDays],
+  );
+  const periodLabels = calendarPeriods(data);
+  /** 그 칸에 바로 넣을 수 있는 강사만 고르게 한다. */
+  const freeFor = (a: Assignment) =>
+    freeTeachersAt(data, data.timetable, a.day, periodsCovered(a), a.id);
+  const assignTeacher = (id: string, teacherId: string) =>
+    putTimetable((list) => list.map((a) => (a.id === id ? { ...a, teacherId: teacherId || null } : a)));
+
   const hasTimetable = data.timetable.length > 0;
   const viewTargets = [
     ...(view === "class" ? classesInSegment : view === "teacher" ? data.teachers : data.rooms),
@@ -483,6 +502,60 @@ export default function ResultPanel({ data, set }: Props) {
                 칸을 눌러 내용을 고치고, 끌어다 놓아 자리를 옮깁니다. 이미 찬 자리에 놓으면 두 칸이 맞바뀝니다.
                 빈 칸의 <b>+</b> 를 누르면 새 칸이 생깁니다. 노란 칸(고정 활동)은 옮길 수 없습니다.
               </p>
+            )}
+
+            {unassigned.length > 0 && (
+              <div className="mt-4 rounded-lg border border-tt-300 bg-white p-3 text-sm">
+                <p className="mb-2 font-semibold text-tt-800">
+                  강사를 정하지 않은 칸 {unassigned.length}개
+                  <span className="ml-1 font-normal text-tt-600">
+                    · 그 시간에 <b>비어 있는 강사만</b> 고를 수 있습니다
+                  </span>
+                </p>
+                <ul className="space-y-1.5">
+                  {unassigned.slice(0, 30).map((a) => {
+                    const free = freeFor(a);
+                    return (
+                      <li key={a.id} className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditing(true);
+                            setSelectedId(a.id);
+                          }}
+                          className="rounded-md border border-tt-300 px-2 py-1 text-xs font-semibold text-tt-700 hover:bg-tt-50"
+                        >
+                          {className.get(a.classId) ?? "?"} · {data.days[a.day]}{" "}
+                          {periodLabels[a.period]?.label ?? `${a.period + 1}교시`}
+                          {a.length === 2 ? "~" : ""} · {a.subject || "(프로그램 미입력)"}
+                        </button>
+                        {free.length === 0 ? (
+                          <span className="text-xs font-semibold text-amber-700">
+                            이 시간에 비어 있는 강사가 없습니다
+                          </span>
+                        ) : (
+                          <select
+                            aria-label="강사 고르기"
+                            value=""
+                            onChange={(e) => assignTeacher(a.id, e.target.value)}
+                            className="rounded-lg border border-tt-300 bg-white px-2 py-1 text-xs"
+                          >
+                            <option value="">— 강사 고르기 ({free.length}명 가능) —</option>
+                            {free.map((id) => (
+                              <option key={id} value={id}>
+                                {data.teachers.find((t) => t.id === id)?.name || "(이름없음)"}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {unassigned.length > 30 && (
+                    <li className="text-xs text-tt-500">…외 {unassigned.length - 30}개</li>
+                  )}
+                </ul>
+              </div>
             )}
 
             {conflicts.length > 0 && (
