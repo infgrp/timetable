@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AppData } from "../types";
 import { allowedDaysOf, capacityForDays } from "../store";
-import { buildGrids, sliceGrid, usedCells } from "../assignments";
+import { buildGrids, mergedGrid, sliceGrid, usedCells } from "../assignments";
 import { toSheet } from "../timetableSheet";
 import { buildXlsx } from "../xlsx";
 import { downloadBlob, safeFileName } from "../export";
@@ -42,11 +42,25 @@ export default function ViewerPanel({ data, onBuild }: Props) {
       })
     : data.classes;
 
-  const targets = (axis === "class" ? classesHere : axis === "teacher" ? data.teachers : data.rooms).map(
-    (x) => ({ id: x.id, name: x.name || "(이름없음)" }),
-  );
+  // 합본은 체험반별 목록 뒤에 붙는다. 구간을 고른 상태에서는 합칠 이유가 없으므로 숨긴다.
+  const groups = segment ? [] : (data.classGroups ?? []).filter((g) => g.classIds.length > 0);
+  const targets = [
+    ...(axis === "class" ? classesHere : axis === "teacher" ? data.teachers : data.rooms).map((x) => ({
+      id: x.id,
+      name: x.name || "(이름없음)",
+    })),
+    ...(axis === "class" ? groups.map((g) => ({ id: g.id, name: g.name || "(이름없는 묶음)" })) : []),
+  ];
+
+  const groupOf = (id: string) => groups.find((g) => g.id === id) ?? null;
+  const mergedOf = (id: string) => {
+    const g = groupOf(id);
+    return g ? mergedGrid(data, grids, g.classIds, viewDays) : null;
+  };
 
   const gridOf = (id: string): Grid => {
+    const merged = mergedOf(id);
+    if (merged) return merged.grid;
     const full =
       (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
     return segment ? sliceGrid(full, viewDays) : full;
@@ -72,6 +86,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
         slots: data.slots,
         daySlots: data.daySlots,
         grid: gridOf(t.id),
+        bands: mergedOf(t.id)?.bands,
       });
     });
     const label = activePickedId ? shown[0].name : `${AXIS_LABEL[axis]}별`;
@@ -174,9 +189,11 @@ export default function ViewerPanel({ data, onBuild }: Props) {
       ) : (
         <div className={`grid gap-5 ${activePickedId ? "" : "xl:grid-cols-2"}`}>
           {shown.map((t) => {
+            const merged = mergedOf(t.id);
             const g = gridOf(t.id);
             const used = usedCells(g);
-            const capacity = capacityForDays(data, viewDays, axis === "class" ? t.id : undefined);
+            // 합본은 여러 반을 이어 붙인 것이라 반 하나의 등원 요일로 칸 수를 재면 안 된다.
+            const capacity = capacityForDays(data, viewDays, merged || axis !== "class" ? undefined : t.id);
             return (
               <Timetable
                 key={t.id}
@@ -190,6 +207,7 @@ export default function ViewerPanel({ data, onBuild }: Props) {
                 slots={data.slots}
                 daySlots={data.daySlots}
                 grid={g}
+                bands={merged?.bands}
               />
             );
           })}

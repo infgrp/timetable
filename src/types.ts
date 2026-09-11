@@ -64,6 +64,29 @@ export type Room = {
   name: string;
 };
 
+/**
+ * 프로그램마다 늘 같은 체험존을 쓰는 운영을 위한 묶음.
+ * 프로그램 배정에서 이 이름을 적으면 체험존이 자동으로 채워진다.
+ * 배치 규칙이 아니라 입력을 줄이는 장치라, 배정에서 존을 따로 바꿔도 된다.
+ */
+export type ProgramRoom = {
+  /** 프로그램 이름. 대소문자와 앞뒤 공백은 무시하고 맞춘다. */
+  subject: string;
+  roomId: string;
+};
+
+/**
+ * 합본 시간표 — 구간이 다른 체험반을 한 장으로 묶어 본다.
+ * 월·화에는 3학년 A반이, 수·목·금에는 5학년 C반이 같은 팀 자리를 쓸 때
+ * "TEAM C" 한 장으로 인쇄하려는 용도다. 배치에는 전혀 관여하지 않는다.
+ */
+export type ClassGroup = {
+  id: string;
+  name: string;
+  /** 묶을 체험반. 요일이 겹치지 않아야 한 장에 온전히 담긴다. */
+  classIds: string[];
+};
+
 export type Teacher = {
   id: string;
   name: string;
@@ -181,7 +204,11 @@ export type AppData = {
   /** 운영 구간 (월·화 / 수·목·금). 비어 있으면 모든 반이 모든 요일에 온다. */
   segments: Segment[];
   classes: Klass[];
+  /** 구간이 다른 반을 한 장으로 묶어 보는 합본 (보기·인쇄 전용) */
+  classGroups: ClassGroup[];
   rooms: Room[];
+  /** 프로그램 이름에 고정으로 붙는 체험존 */
+  programRooms: ProgramRoom[];
   teachers: Teacher[];
   courses: Course[];
   /** 현재 구성된 시간표. 로테이션을 돌리면 여기의 강사가 바뀐다. */

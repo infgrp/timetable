@@ -1,5 +1,6 @@
 import type {
   AppData,
+  ClassGroup,
   Course,
   DaySlot,
   FixedActivity,
@@ -111,10 +112,34 @@ export function newSegment(name = "", days: number[] = []): Segment {
   return { id: uid("sg"), name, days };
 }
 
+export function newClassGroup(name = "", classIds: string[] = []): ClassGroup {
+  return { id: uid("cg"), name, classIds };
+}
+
+/** ── 프로그램–체험존 묶음 ───────────────────────────────── */
+
+const programKey = (subject: string) => subject.trim().toLowerCase();
+
+/** 프로그램 이름 → 체험존 id. 대소문자·앞뒤 공백은 무시한다. */
+export function programRoomMap(data: AppData): Map<string, string> {
+  const rooms = new Set(data.rooms.map((r) => r.id));
+  const map = new Map<string, string>();
+  for (const p of data.programRooms ?? []) {
+    const key = programKey(p.subject);
+    if (key && rooms.has(p.roomId) && !map.has(key)) map.set(key, p.roomId);
+  }
+  return map;
+}
+
+/** 이 프로그램에 묶인 체험존. 없으면 null. */
+export function programRoomOf(data: AppData, subject: string): string | null {
+  return programRoomMap(data).get(programKey(subject)) ?? null;
+}
+
 export function defaultData(): AppData {
   const classes: Klass[] = ["A", "B", "C", "D"].map((n) => ({
     id: uid("k"),
-    name: `${n}반`,
+    name: `TEAM ${n}`,
     segmentId: null,
   }));
   return {
@@ -128,7 +153,9 @@ export function defaultData(): AppData {
     ],
     segments: [],
     classes,
+    classGroups: [],
     rooms: [],
+    programRooms: [],
     teachers: [],
     courses: [],
     timetable: [],
@@ -595,6 +622,8 @@ export function migrate(raw: unknown): AppData | null {
     segments: Array.isArray(parsed.segments) ? parsed.segments : [],
     daySlots: parsed.daySlots && typeof parsed.daySlots === "object" ? parsed.daySlots : {},
     classes: Array.isArray(parsed.classes) ? parsed.classes : base.classes,
+    classGroups: Array.isArray(parsed.classGroups) ? parsed.classGroups : [],
+    programRooms: Array.isArray(parsed.programRooms) ? parsed.programRooms : [],
     timetable: Array.isArray(parsed.timetable) ? parsed.timetable : [],
     rotation: {
       groups: Array.isArray(rotation.groups) ? rotation.groups : [],

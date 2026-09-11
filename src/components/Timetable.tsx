@@ -44,6 +44,7 @@ export default function Timetable({
   grid,
   edit,
   daySlots,
+  bands,
 }: {
   title: string;
   subtitle?: string;
@@ -52,6 +53,8 @@ export default function Timetable({
   grid: Grid;
   edit?: EditHooks;
   daySlots?: Record<string, DaySlot[]>;
+  /** 요일 머리 위에 얹는 묶음 줄 (합본에서 LOW(3학년) | HIGH(5학년) 처럼 쓴다) */
+  bands?: { label: string; span: number }[];
 }) {
   let periodIndex = -1;
   return (
@@ -69,6 +72,20 @@ export default function Timetable({
             ))}
           </colgroup>
           <thead>
+            {bands && bands.length > 0 && (
+              <tr>
+                <th className="border border-tt-200 bg-tt-50" />
+                {bands.map((b, i) => (
+                  <th
+                    key={`${b.label}-${i}`}
+                    colSpan={b.span}
+                    className="border border-tt-200 bg-tt-50 px-2 py-1 text-xs font-bold text-tt-700"
+                  >
+                    {b.label}
+                  </th>
+                ))}
+              </tr>
+            )}
             <tr>
               <th className="border border-tt-200 bg-tt-50 px-1 py-1 text-xs text-tt-600">교시</th>
               {days.map((d) => (

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { AppData, Course } from "../types";
-import { buildLectures, classCapacity, emptyCourse, roomLoads, weekCapacity } from "../store";
+import { buildLectures, classCapacity, emptyCourse, programRoomMap, roomLoads, weekCapacity } from "../store";
 import { Button, Card, Empty, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -44,6 +44,14 @@ export default function CoursesPanel({ data, set }: Props) {
   const patch = (id: string, p: Partial<Course>) =>
     set((d) => ({ ...d, courses: d.courses.map((c) => (c.id === id ? { ...c, ...p } : c)) }));
 
+  /** 프로그램 이름 → 묶어 둔 체험존. 이름을 고치면 존을 따라 바꾼다. */
+  const roomFor = (subject: string) => programRoomMap(data).get(subject.trim().toLowerCase()) ?? null;
+  const patchSubject = (c: Course, subject: string) => {
+    const linked = roomFor(subject);
+    // 묶음이 있으면 존을 맞춰 준다. 묶음에 없는 이름이면 손으로 고른 존을 건드리지 않는다.
+    patch(c.id, linked ? { subject, roomId: linked } : { subject });
+  };
+
   const addCourse = () =>
     set((d) => {
       const made = emptyCourse(d.teachers[0]?.id ?? "");
@@ -51,6 +59,47 @@ export default function CoursesPanel({ data, set }: Props) {
       if (segClassIds) made.classIds = d.classes.filter((c) => segClassIds.has(c.id)).map((c) => c.id);
       return { ...d, courses: [...d.courses, made] };
     });
+
+  /** ── 프로그램–체험존 묶음 ── */
+  const programNames = useMemo(
+    () => [...new Set(data.courses.map((c) => c.subject.trim()).filter(Boolean))].sort(),
+    [data.courses],
+  );
+  const setProgramRooms = (fn: (list: AppData["programRooms"]) => AppData["programRooms"]) =>
+    set((d) => ({ ...d, programRooms: fn(d.programRooms ?? []) }));
+  const addProgramRoom = () =>
+    setProgramRooms((list) => [...list, { subject: "", roomId: data.rooms[0]?.id ?? "" }]);
+  const patchProgramRoom = (i: number, p: Partial<AppData["programRooms"][number]>) =>
+    setProgramRooms((list) => list.map((x, k) => (k === i ? { ...x, ...p } : x)));
+  const removeProgramRoom = (i: number) => setProgramRooms((list) => list.filter((_, k) => k !== i));
+  /** 이미 존을 지정해 둔 배정에서 묶음을 뽑아 온다 (먼저 나온 존이 이긴다). */
+  const pullProgramRooms = () =>
+    setProgramRooms((list) => {
+      const have = new Set(list.map((p) => p.subject.trim().toLowerCase()));
+      const out = [...list];
+      for (const c of data.courses) {
+        const key = c.subject.trim().toLowerCase();
+        if (!key || !c.roomId || have.has(key)) continue;
+        have.add(key);
+        out.push({ subject: c.subject.trim(), roomId: c.roomId });
+      }
+      return out;
+    });
+  /** 묶음에 있는 프로그램의 배정 체험존을 한 번에 맞춘다. */
+  const applyProgramRooms = () => {
+    const map = programRoomMap(data);
+    let n = 0;
+    set((d) => ({
+      ...d,
+      courses: d.courses.map((c) => {
+        const linked = map.get(c.subject.trim().toLowerCase());
+        if (!linked || c.roomId === linked) return c;
+        n += 1;
+        return { ...c, roomId: linked };
+      }),
+    }));
+    alert(n === 0 ? "바꿀 배정이 없습니다." : `배정 ${n}건의 체험존을 묶음에 맞췄습니다.`);
+  };
 
   const duplicate = (c: Course) =>
     set((d) => ({
@@ -145,9 +194,10 @@ export default function CoursesPanel({ data, set }: Props) {
                       </td>
                       <td className="py-1.5 pr-2">
                         <TextInput
+                          list="tt-program-options"
                           value={c.subject}
                           placeholder="예) Airport & Immigration"
-                          onChange={(e) => patch(c.id, { subject: e.target.value })}
+                          onChange={(e) => patchSubject(c, e.target.value)}
                         />
                         <TextInput
                           value={c.teacherSubject ?? ""}
@@ -318,6 +368,61 @@ export default function CoursesPanel({ data, set }: Props) {
           </div>
         )}
       </Card>
+
+      <Card
+        title={`프로그램–체험존 묶음 (${(data.programRooms ?? []).length}개)`}
+        desc="프로그램마다 쓰는 존이 정해져 있다면 여기에 묶어 두세요. 위 배정에서 그 프로그램 이름을 적으면 체험존이 자동으로 채워집니다."
+        right={
+          <div className="flex gap-1.5">
+            <Button onClick={pullProgramRooms}>지금 배정에서 가져오기</Button>
+            <Button variant="primary" onClick={addProgramRoom}>
+              + 묶음 추가
+            </Button>
+          </div>
+        }
+      >
+        {data.rooms.length === 0 ? (
+          <Empty>먼저 [체험반·체험존] 탭에서 체험존을 만드세요.</Empty>
+        ) : (data.programRooms ?? []).length === 0 ? (
+          <Empty>
+            묶음이 없습니다. [지금 배정에서 가져오기]를 누르면 이미 존을 지정해 둔 프로그램이 한 번에 들어옵니다.
+          </Empty>
+        ) : (
+          <ul className="flex flex-col gap-1.5">
+            {(data.programRooms ?? []).map((pr, i) => (
+              <li key={`${pr.subject}-${i}`} className="flex items-center gap-2">
+                <TextInput
+                  list="tt-program-options"
+                  value={pr.subject}
+                  placeholder="프로그램 이름"
+                  onChange={(e) => patchProgramRoom(i, { subject: e.target.value })}
+                />
+                <Select value={pr.roomId} onChange={(e) => patchProgramRoom(i, { roomId: e.target.value })}>
+                  {data.rooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name || "(이름없음)"}
+                    </option>
+                  ))}
+                </Select>
+                <Button variant="danger" title="삭제" onClick={() => removeProgramRoom(i)}>
+                  ×
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {(data.programRooms ?? []).length > 0 && (
+          <div className="mt-3">
+            <Button onClick={applyProgramRooms}>묶음대로 기존 배정의 체험존 맞추기</Button>
+          </div>
+        )}
+      </Card>
+
+      <datalist id="tt-program-options">
+        {programNames.map((n) => (
+          <option key={n} value={n} />
+        ))}
+      </datalist>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card title="체험반별 총 시수" desc="그 반이 오는 요일과 고정 활동을 뺀 실제 칸 수와 견줍니다">

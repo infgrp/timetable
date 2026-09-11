@@ -12,6 +12,8 @@ export function toSheet(opts: {
   slots: DaySlot[];
   grid: Grid;
   daySlots?: Record<string, DaySlot[]>;
+  /** 요일 머리 위에 얹는 묶음 줄 (합본 시간표) */
+  bands?: { label: string; span: number }[];
 }): XSheet {
   const { days, slots, grid } = opts;
   const cols = days.length + 1;
@@ -27,6 +29,20 @@ export function toSheet(opts: {
   rows.push(titleRow);
   rowHeights.push(26);
   merges.push({ r1: 0, c1: 0, r2: 0, c2: cols - 1 });
+
+  // 묶음 줄 (합본에서 구간 이름)
+  if (opts.bands && opts.bands.length > 0) {
+    const r = rows.length;
+    const band = blankRow();
+    let c = 1;
+    for (const b of opts.bands) {
+      band[c] = { text: b.label, style: "header" };
+      if (b.span > 1) merges.push({ r1: r, c1: c, r2: r, c2: c + b.span - 1 });
+      c += b.span;
+    }
+    rows.push(band);
+    rowHeights.push(20);
+  }
 
   // 머리글
   const head = blankRow();

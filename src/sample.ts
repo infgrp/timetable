@@ -16,8 +16,8 @@ export function sampleData(): AppData {
   const segLate = { id: uid("sg"), name: "수·목·금 (4학년)", days: [2, 3, 4] };
 
   const classes: Klass[] = [
-    ...["A", "B", "C"].map((n) => ({ id: uid("k"), name: `${n}반`, segmentId: segEarly.id })),
-    ...["D", "E", "F"].map((n) => ({ id: uid("k"), name: `${n}반`, segmentId: segLate.id })),
+    ...["A", "B", "C"].map((n) => ({ id: uid("k"), name: `TEAM ${n}`, segmentId: segEarly.id })),
+    ...["D", "E", "F"].map((n) => ({ id: uid("k"), name: `TEAM ${n}`, segmentId: segLate.id })),
   ];
   const earlyIds = classes.filter((c) => c.segmentId === segEarly.id).map((c) => c.id);
   const lateIds = classes.filter((c) => c.segmentId === segLate.id).map((c) => c.id);
@@ -83,7 +83,18 @@ export function sampleData(): AppData {
     ],
     segments: [segEarly, segLate],
     classes,
+    // 월·화 TEAM A 와 수·목·금 TEAM D 는 같은 팀 자리라 한 장으로 묶어 본다.
+    classGroups: [{ id: uid("cg"), name: "TEAM A+D 합본", classIds: [earlyIds[0], lateIds[0]] }],
     rooms,
+    // 존 체험은 프로그램마다 존이 고정이다 — 배정할 때 자동으로 채워진다.
+    programRooms: [
+      { subject: "Airport & Immigration", roomId: zone("공항·출입국존") },
+      { subject: "Restaurant & Ordering", roomId: zone("레스토랑존") },
+      { subject: "Shopping & Money", roomId: zone("마트·쇼핑존") },
+      { subject: "Clinic & Health", roomId: zone("병원·클리닉존") },
+      { subject: "Media Studio", roomId: zone("미디어 스튜디오") },
+      { subject: "World Culture", roomId: zone("컬처룸") },
+    ],
     teachers: [...teacherId.entries()].map(([name, id]) => ({
       id,
       name,

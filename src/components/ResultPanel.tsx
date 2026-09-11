@@ -13,8 +13,10 @@ import {
   conflictLabel,
   conflictsOf,
   dayAllowedFor,
+  draftForOwner,
   fits,
   fromSolveResult,
+  mergedGrid,
   newAssignment,
   periodsCovered,
   removeAssignment,
@@ -165,8 +167,7 @@ export default function ResultPanel({ data, set }: Props) {
     set((d) => ({ ...d, timetable: fn(d.timetable) }));
 
   const addAt = (ownerId: string, axis: Axis, day: number, period: number) => {
-    const classId = axis === "class" ? ownerId : (data.classes.find((c) => dayAllowedFor(data, c.id, day))?.id ?? "");
-    if (!classId) {
+    if (data.classes.length === 0) {
       alert("먼저 [체험반·체험존] 탭에서 체험반을 만드세요.");
       return;
     }
@@ -175,19 +176,22 @@ export default function ResultPanel({ data, set }: Props) {
       alert(`${fixedName} 시간이라 수업을 넣을 수 없습니다. [운영 시간] 탭에서 고정 활동을 고치세요.`);
       return;
     }
+    // 강사·체험존 격자에서 만들면 그 시간에 비어 있는 반을 골라 프로그램까지 채운다.
+    // 원어민이 자기 시간표를 먼저 짜면 그대로 체험반 시간표가 된다.
+    const draft =
+      axis === "class"
+        ? { classId: ownerId }
+        : draftForOwner(data, data.timetable, ownerId, axis, day, period);
+    if (!draft) {
+      alert(`${data.days[day]}요일 이 교시에는 비어 있는 체험반이 없습니다. 먼저 다른 반의 칸을 옮기거나 지우세요.`);
+      return;
+    }
+    const classId = draft.classId ?? "";
     if (!dayAllowedFor(data, classId, day)) {
       alert(`${className.get(classId) ?? "이 반"}은(는) ${data.days[day]}요일에 오지 않습니다.`);
       return;
     }
-    const a = newAssignment({
-      classId,
-      teacherId: axis === "teacher" ? ownerId : null,
-      roomId: axis === "room" ? ownerId : null,
-      subject: "",
-      day,
-      period,
-      length: 1,
-    });
+    const a = newAssignment({ subject: "", ...draft, day, period, length: 1 });
     putTimetable((list) => sortAssignments([...list, a]));
     setSelectedId(a.id);
   };
@@ -266,9 +270,21 @@ export default function ResultPanel({ data, set }: Props) {
       })
     : data.classes;
 
-  const targets: Target[] = (
-    kind === "class" ? classesInSegment : kind === "teacher" ? data.teachers : data.rooms
-  ).map((x) => ({ id: x.id, name: x.name || "(이름없음)" }));
+  // 합본(체험반 묶음)은 보기·받기에만 쓴다. 구간을 골라 본 상태에서는 합칠 이유가 없으므로 숨긴다.
+  const groups = segment ? [] : (data.classGroups ?? []).filter((g) => g.classIds.length > 0);
+  const groupOf = (id: string) => groups.find((g) => g.id === id) ?? null;
+  const mergedOf = (id: string) => {
+    const g = groupOf(id);
+    return g ? mergedGrid(data, grids, g.classIds, viewDays) : null;
+  };
+
+  const targets: Target[] = [
+    ...(kind === "class" ? classesInSegment : kind === "teacher" ? data.teachers : data.rooms).map((x) => ({
+      id: x.id,
+      name: x.name || "(이름없음)",
+    })),
+    ...(kind === "class" ? groups.map((g) => ({ id: g.id, name: g.name || "(이름없는 묶음)" })) : []),
+  ];
 
   const kindLabel = AXIS_LABEL[kind];
   const q = query.trim().toLowerCase();
@@ -277,6 +293,8 @@ export default function ResultPanel({ data, set }: Props) {
   const match = exact ?? (hits.length === 1 ? hits[0] : null);
 
   const gridOf = (id: string, axis: Axis): Grid => {
+    const merged = mergedOf(id);
+    if (merged) return merged.grid;
     const full =
       (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
     return segment ? sliceGrid(full, viewDays) : full;
@@ -294,6 +312,7 @@ export default function ResultPanel({ data, set }: Props) {
       slots: data.slots,
       daySlots: data.daySlots,
       grid: gridOf(t.id, kind),
+      bands: mergedOf(t.id)?.bands,
     });
 
   const downloadOne = () => {
@@ -312,7 +331,10 @@ export default function ResultPanel({ data, set }: Props) {
   };
 
   const hasTimetable = data.timetable.length > 0;
-  const viewTargets = view === "class" ? classesInSegment : view === "teacher" ? data.teachers : data.rooms;
+  const viewTargets = [
+    ...(view === "class" ? classesInSegment : view === "teacher" ? data.teachers : data.rooms),
+    ...(view === "class" ? groups : []),
+  ];
 
   return (
     <div className="flex flex-col gap-5">
@@ -394,7 +416,9 @@ export default function ResultPanel({ data, set }: Props) {
 
       <ImportPanel data={data} set={set} />
 
-      {hasTimetable && (
+      {/* 빈 시간표를 손으로 채우는 중에도 구분(체험반별·강사별)을 바꿀 수 있어야 한다 —
+          원어민이 자기 격자로 먼저 짜는 방식이 여기서 시작된다. */}
+      {(hasTimetable || editing) && (
         <>
           <Card>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -601,16 +625,20 @@ export default function ResultPanel({ data, set }: Props) {
       {(hasTimetable || editing) && (
         <div className="grid gap-5 xl:grid-cols-2">
           {viewTargets.map((x) => {
+            const merged = mergedOf(x.id);
             const g = gridOf(x.id, view);
             const used = usedCells(g);
             const name = x.name || "(이름없음)";
-            const capacity = capacityForDays(data, viewDays, view === "class" ? x.id : undefined);
+            // 합본은 여러 반을 이어 붙인 것이라 반 하나의 등원 요일로 칸 수를 재면 안 된다.
+            const capacity = capacityForDays(data, viewDays, merged || view !== "class" ? undefined : x.id);
             return (
               <Timetable
                 key={x.id}
                 title={`${view === "teacher" ? `${name} 강사` : `${head}${name}`}${segSuffix}`}
                 subtitle={
-                  view === "class"
+                  merged
+                    ? `합본 · 주 ${used}시간`
+                    : view === "class"
                     ? `주 ${used}시간 · 빈 칸 ${Math.max(0, capacity - used)}`
                     : view === "teacher"
                       ? `주 ${used}시간`
@@ -620,7 +648,8 @@ export default function ResultPanel({ data, set }: Props) {
                 slots={data.slots}
                 daySlots={data.daySlots}
                 grid={g}
-                edit={hooksFor(x.id, view)}
+                bands={merged?.bands}
+                edit={merged ? undefined : hooksFor(x.id, view)}
               />
             );
           })}

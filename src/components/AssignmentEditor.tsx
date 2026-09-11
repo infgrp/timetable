@@ -1,6 +1,7 @@
 import type { AppData, Assignment } from "../types";
 import { fits, knownSubjects } from "../assignments";
 import { dayPeriods } from "../calendar";
+import { programRoomMap } from "../store";
 import { Button, Field, Select, TextInput } from "./ui";
 
 type Props = {
@@ -15,6 +16,11 @@ type Props = {
 export default function AssignmentEditor({ data, value, onChange, onDelete, onClose }: Props) {
   const periods = dayPeriods(data, value.day);
   const patch = (p: Partial<Assignment>) => onChange({ ...value, ...p });
+  /** 프로그램에 묶어 둔 체험존이 있으면 이름을 고칠 때 존도 따라 바꾼다. */
+  const patchSubject = (subject: string) => {
+    const linked = programRoomMap(data).get(subject.trim().toLowerCase());
+    patch(linked ? { subject, roomId: linked } : { subject });
+  };
   const canBlock = fits(data, value.day, value.period, 2);
 
   return (
@@ -46,7 +52,7 @@ export default function AssignmentEditor({ data, value, onChange, onDelete, onCl
             list="tt-subject-options"
             value={value.subject}
             placeholder="예) Homeroom English"
-            onChange={(e) => patch({ subject: e.target.value })}
+            onChange={(e) => patchSubject(e.target.value)}
           />
           <datalist id="tt-subject-options">
             {knownSubjects(data).map((s) => (

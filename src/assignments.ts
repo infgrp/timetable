@@ -5,7 +5,7 @@
  * 화면 격자·엑셀 내보내기·로테이션은 모두 이 목록만 읽는다.
  */
 import type { AppData, Assignment, Lecture, SolveResult } from "./types";
-import { allowedDaysOf, blockableFlags, dayGroups, fixedCellNames, fixedCellRooms, slotKey, uid } from "./store";
+import { allowedDaysOf, blockableFlags, dayGroups, fixedCellNames, fixedCellRooms, programRoomOf, slotKey, uid } from "./store";
 import { hueOf } from "./components/Timetable";
 import type { Cell, Grid } from "./components/Timetable";
 import { calendarPeriods, dayPeriods, slotsFor } from "./calendar";
@@ -296,6 +296,101 @@ export type Grids = {
   byTeacher: Map<string, Grid>;
   byRoom: Map<string, Grid>;
 };
+
+/**
+ * 강사·체험존 격자에서 빈 칸을 눌러 새 칸을 만들 때 채워 둘 값.
+ *
+ * 원어민이 자기 시간표를 먼저 짜면 그대로 체험반 시간표가 되도록,
+ * 그 시간에 비어 있는 체험반 가운데 이 강사(또는 이 존)가 맡기로 한 반을 먼저 고르고
+ * 프로그램·체험존까지 함께 채운다. 맞는 배정이 없으면 빈 반만 고른다.
+ */
+export function draftForOwner(
+  data: AppData,
+  list: Assignment[],
+  ownerId: string,
+  axis: "teacher" | "room",
+  day: number,
+  period: number,
+): Partial<Assignment> | null {
+  const busy = new Set(
+    list.filter((a) => a.day === day && periodsCovered(a).includes(period)).map((a) => a.classId),
+  );
+  const free = data.classes.filter((c) => dayAllowedFor(data, c.id, day) && !busy.has(c.id));
+  if (free.length === 0) return null;
+
+  // 이 강사(존)의 배정 중, 아직 시수가 남은 반을 먼저 본다.
+  const mine = data.courses.filter((c) => (axis === "teacher" ? c.teacherId === ownerId : c.roomId === ownerId));
+  const placed = (classId: string, subject: string) =>
+    list.filter((a) => a.classId === classId && a.subject === subject).reduce((n, a) => n + a.length, 0);
+
+  for (const klass of free) {
+    const course =
+      mine.find((c) => c.classIds.includes(klass.id) && placed(klass.id, c.subject) < c.hours) ??
+      mine.find((c) => c.classIds.includes(klass.id));
+    if (!course) continue;
+    return {
+      classId: klass.id,
+      teacherId: course.teacherId || null,
+      roomId: course.roomId ?? programRoomOf(data, course.subject) ?? (axis === "room" ? ownerId : null),
+      subject: course.subject,
+      teacherSubject: course.teacherSubject?.trim() || undefined,
+      hideTeacher: course.hideTeacher,
+      oncePerSegment: course.oncePerSegment,
+    };
+  }
+  return {
+    classId: free[0].id,
+    teacherId: axis === "teacher" ? ownerId : null,
+    roomId: axis === "room" ? ownerId : null,
+    subject: "",
+  };
+}
+
+/**
+ * 합본 시간표 — 구간이 다른 체험반들의 격자를 요일별로 이어 붙인다.
+ *
+ * 요일마다 그날 등원하는 반의 칸을 쓴다. 두 반이 같은 요일에 겹치면
+ * 먼저 적힌 반이 이기고, 그 사실을 overlap 으로 알린다.
+ * bands 는 표 위에 얹을 구간 머리(예: LOW(3학년) | HIGH(5학년))다.
+ */
+export function mergedGrid(
+  data: AppData,
+  grids: Grids,
+  classIds: string[],
+  days: number[],
+): { grid: Grid; bands: { label: string; span: number }[]; overlap: boolean } {
+  const periods = calendarPeriods(data);
+  const members = classIds
+    .map((id) => data.classes.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => Boolean(c));
+  const grid: Grid = Array.from({ length: periods.length }, () => new Array(days.length).fill(null));
+  const owners: (string | null)[] = [];
+  let overlap = false;
+
+  days.forEach((day, di) => {
+    const here = members.filter((c) => allowedDaysOf(data, c).includes(day));
+    if (here.length > 1) overlap = true;
+    const owner = here[0] ?? null;
+    owners.push(owner ? owner.name || "(이름없음)" : null);
+    if (!owner) return;
+    const src = grids.byClass.get(owner.id);
+    if (!src) return;
+    for (let p = 0; p < periods.length; p++) grid[p][di] = src[p]?.[day] ?? null;
+  });
+
+  // 같은 반이 이어지는 요일끼리 머리를 합친다. 구간 이름이 있으면 그걸 쓴다.
+  const bands: { label: string; span: number }[] = [];
+  owners.forEach((name) => {
+    const klass = members.find((c) => (c.name || "(이름없음)") === name);
+    const seg = klass ? data.segments.find((s) => s.id === klass.segmentId) : null;
+    const label = name ? seg?.name || name : "";
+    const last = bands[bands.length - 1];
+    if (last && last.label === label) last.span += 1;
+    else bands.push({ label, span: 1 });
+  });
+
+  return { grid, bands, overlap };
+}
 
 export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<string>): Grids {
   const periods = calendarPeriods(data);

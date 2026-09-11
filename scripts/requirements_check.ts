@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { buildLectures, defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, comboLimitOf, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, validate, migrate } from "../src/store";
+import { buildLectures, defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, comboLimitOf, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, programRoomOf, validate, migrate } from "../src/store";
 import { calendarPeriods, changeDays, changeSlots, dayPeriods, scopeData, mergeSolved } from "../src/calendar";
-import { buildGrids, conflictsOf, fits, fromSolveResult, newAssignment } from "../src/assignments";
+import { buildGrids, conflictsOf, draftForOwner, fits, fromSolveResult, mergedGrid, newAssignment } from "../src/assignments";
 import { sampleData } from "../src/sample";
 import { solve } from "../src/solver";
 import { applyRotation, previewRotation, previewUndo, rotateAssignments, undoRotation } from "../src/rotation";
@@ -413,6 +413,88 @@ await check("프로그램을 특정 요일에 못 박기 (Science 1 은 월, Sci
     segments: [{ id: "seg", name: "화수", days: [1, 2] }],
   };
   assert(validate(offDay).some((i) => i.level === "error" && i.text.includes("그 요일에 오지 않습니다")));
+});
+
+await check("체험반 기본 이름은 TEAM A 형식", () => {
+  assert.deepEqual(defaultData().classes.map((c) => c.name), ["TEAM A", "TEAM B", "TEAM C", "TEAM D"]);
+  assert(sampleData().classes.every((c) => /^TEAM [A-F]$/.test(c.name)));
+});
+
+await check("프로그램-체험존 묶음: 이름만 정하면 존이 따라온다", () => {
+  const data = sampleData();
+  const studio = data.rooms.find((r) => r.name === "미디어 스튜디오")!.id;
+  assert.equal(programRoomOf(data, "Media Studio"), studio);
+  // 대소문자와 앞뒤 공백은 무시한다.
+  assert.equal(programRoomOf(data, "  media studio "), studio);
+  // 묶음에 없는 이름은 존을 정하지 않는다 (손으로 고른 값을 건드리지 않으려고).
+  assert.equal(programRoomOf(data, "Homeroom English"), null);
+  // 존이 지워지면 그 묶음도 무시된다.
+  const gone = { ...data, rooms: data.rooms.filter((r) => r.id !== studio) };
+  assert.equal(programRoomOf(gone, "Media Studio"), null);
+});
+
+await check("강사 격자에서 만든 칸이 그 강사의 반·프로그램으로 채워진다", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월", "화"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 2, lunchAfter: 0 }),
+    classes: [{ id: "K1", name: "TEAM A" }, { id: "K2", name: "TEAM B" }],
+    rooms: [{ id: "R", name: "컬처룸" }],
+    teachers: [{ id: "T", name: "정하늘", unavailable: [] }],
+    courses: [{ id: "c", teacherId: "T", subject: "Adventure", classIds: ["K2"], hours: 1, blocks: 0, roomId: "R", hideTeacher: true }],
+    timetable: [],
+  };
+  // 이 강사가 맡은 반(K2)을 고르고 프로그램·존·강사 숨김까지 물려받는다.
+  const d1 = draftForOwner(data, [], "T", "teacher", 0, 0)!;
+  assert.equal(d1.classId, "K2");
+  assert.equal(d1.subject, "Adventure");
+  assert.equal(d1.roomId, "R");
+  assert.equal(d1.teacherId, "T");
+  assert.equal(d1.hideTeacher, true);
+
+  // 그 반이 이미 그 시간에 차 있으면 비어 있는 다른 반을 고른다.
+  const busy = [newAssignment({ classId: "K2", day: 0, period: 0, subject: "X" })];
+  assert.equal(draftForOwner(data, busy, "T", "teacher", 0, 0)!.classId, "K1");
+
+  // 모든 반이 차 있으면 만들지 않는다 (엉뚱한 반에 얹지 않으려고).
+  const full = [...busy, newAssignment({ classId: "K1", day: 0, period: 0, subject: "Y" })];
+  assert.equal(draftForOwner(data, full, "T", "teacher", 0, 0), null);
+
+  // 배정에 존이 없으면 프로그램-체험존 묶음에서 가져온다.
+  const linked: AppData = { ...data, courses: [{ ...data.courses[0], roomId: null }], programRooms: [{ subject: "adventure", roomId: "R" }] };
+  assert.equal(draftForOwner(linked, [], "T", "teacher", 0, 0)!.roomId, "R");
+});
+
+await check("합본 시간표: 구간이 다른 두 반을 한 장으로", () => {
+  const data: AppData = {
+    ...defaultData(), days: ["월", "화", "수"], fixedActivities: [],
+    slots: generateSlots({ ...DEFAULT_GEN, periodCount: 1, lunchAfter: 0 }),
+    segments: [{ id: "lo", name: "LOW(3학년)", days: [0, 1] }, { id: "hi", name: "HIGH(5학년)", days: [2] }],
+    classes: [{ id: "A", name: "TEAM A", segmentId: "lo" }, { id: "C", name: "TEAM C", segmentId: "hi" }],
+    classGroups: [{ id: "g", name: "TEAM A+C", classIds: ["A", "C"] }],
+    rooms: [], teachers: [{ id: "T", name: "T", unavailable: [] }], courses: [],
+    timetable: [
+      newAssignment({ classId: "A", teacherId: "T", subject: "월수업", day: 0, period: 0 }),
+      newAssignment({ classId: "C", teacherId: "T", subject: "수수업", day: 2, period: 0 }),
+    ],
+  };
+  const grids = buildGrids(data, data.timetable);
+  const { grid, bands, overlap } = mergedGrid(data, grids, ["A", "C"], [0, 1, 2]);
+  assert.equal(overlap, false);
+  // 월·화는 TEAM A 의 칸, 수요일은 TEAM C 의 칸이 온다.
+  assert.equal((grid[0][0] as { top: string }).top, "월수업");
+  assert.equal(grid[0][1], null);
+  assert.equal((grid[0][2] as { top: string }).top, "수수업");
+  // 표 위 머리는 구간 이름으로 묶인다.
+  assert.deepEqual(bands, [{ label: "LOW(3학년)", span: 2 }, { label: "HIGH(5학년)", span: 1 }]);
+
+  // 엑셀에도 그 머리줄이 병합되어 들어간다.
+  const sheet = toSheet({ sheetName: "합본", title: "TEAM A+C", days: ["월", "화", "수"], slots: data.slots, grid, bands });
+  assert.equal(sheet.rows[1][1]?.text, "LOW(3학년)");
+  assert(sheet.merges.some((m) => m.r1 === 1 && m.c1 === 1 && m.c2 === 2));
+
+  // 요일이 겹치면 먼저 고른 반이 이기고 그 사실을 알린다.
+  const sameSeg = { ...data, classes: data.classes.map((c) => ({ ...c, segmentId: "lo" })) };
+  assert.equal(mergedGrid(sameSeg, grids, ["A", "C"], [0, 1]).overlap, true);
 });
 
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);

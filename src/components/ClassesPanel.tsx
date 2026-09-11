@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AppData, Klass } from "../types";
-import { allowedDaysOf, newSegment, uid } from "../store";
+import { allowedDaysOf, newClassGroup, newSegment, uid } from "../store";
 import { Button, Card, Empty, Field, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -26,7 +26,7 @@ export default function ClassesPanel({ data, set }: Props) {
   const previewNames = () => {
     const out: string[] = [];
     for (let i = 0; i < count; i++) {
-      if (scheme === "alpha") out.push(`${String.fromCharCode(65 + (i % 26))}반`);
+      if (scheme === "alpha") out.push(`TEAM ${String.fromCharCode(65 + (i % 26))}`);
       else if (scheme === "num") out.push(`${i + 1}반`);
       else out.push(`${prefix}-${i + 1}`);
     }
@@ -182,7 +182,7 @@ export default function ClassesPanel({ data, set }: Props) {
           <div className="w-36">
             <Field label="이름 형식">
               <Select value={scheme} onChange={(e) => setScheme(e.target.value as typeof scheme)}>
-                <option value="alpha">A반, B반 …</option>
+                <option value="alpha">TEAM A, TEAM B …</option>
                 <option value="num">1반, 2반 …</option>
                 <option value="grade">3-1, 3-2 … (방문 학급)</option>
               </Select>
@@ -240,7 +240,7 @@ export default function ClassesPanel({ data, set }: Props) {
               <div key={c.id} className="flex items-center gap-1">
                 <TextInput
                   value={c.name}
-                  placeholder="A반"
+                  placeholder="TEAM A"
                   onChange={(e) =>
                     set((d) => ({
                       ...d,
@@ -277,6 +277,93 @@ export default function ClassesPanel({ data, set }: Props) {
               </div>
             ))}
           </div>
+        )}
+      </Card>
+
+      <Card
+        title={`체험반 묶음 (${(data.classGroups ?? []).length}개)`}
+        desc="구간이 다른 두 반을 한 장으로 묶어 봅니다. 월·화에 오는 반과 수·목·금에 오는 반이 같은 팀 자리를 쓸 때, 합쳐서 인쇄하거나 받을 수 있습니다. 배치에는 영향을 주지 않습니다."
+        right={
+          <Button variant="primary" onClick={() => set((d) => ({ ...d, classGroups: [...(d.classGroups ?? []), newClassGroup("", [])] }))}>
+            + 묶음 추가
+          </Button>
+        }
+      >
+        {(data.classGroups ?? []).length === 0 ? (
+          <Empty>묶음이 없습니다. 합쳐 보고 싶은 반이 있으면 추가하세요.</Empty>
+        ) : (
+          <ul className="flex flex-col gap-3">
+            {(data.classGroups ?? []).map((g) => {
+              const picked = g.classIds.filter((id) => data.classes.some((c) => c.id === id));
+              // 요일이 겹치면 한 장에 다 담기지 않는다 — 먼저 고른 반이 이긴다.
+              const seen = new Set<number>();
+              let clash = false;
+              for (const id of picked) {
+                const k = data.classes.find((c) => c.id === id)!;
+                for (const d of allowedDaysOf(data, k)) {
+                  if (seen.has(d)) clash = true;
+                  seen.add(d);
+                }
+              }
+              return (
+                <li key={g.id} className="rounded-lg border border-tt-200 p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <TextInput
+                      value={g.name}
+                      placeholder="TEAM C"
+                      onChange={(e) =>
+                        set((d) => ({
+                          ...d,
+                          classGroups: (d.classGroups ?? []).map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)),
+                        }))
+                      }
+                    />
+                    <Button
+                      variant="danger"
+                      title="삭제"
+                      onClick={() => set((d) => ({ ...d, classGroups: (d.classGroups ?? []).filter((x) => x.id !== g.id) }))}
+                    >
+                      ×
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {data.classes.map((c) => {
+                      const on = g.classIds.includes(c.id);
+                      const seg = data.segments.find((x) => x.id === c.segmentId);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() =>
+                            set((d) => ({
+                              ...d,
+                              classGroups: (d.classGroups ?? []).map((x) =>
+                                x.id === g.id
+                                  ? { ...x, classIds: on ? x.classIds.filter((i) => i !== c.id) : [...x.classIds, c.id] }
+                                  : x,
+                              ),
+                            }))
+                          }
+                          className={`rounded-md border px-2 py-1 text-xs font-semibold ${
+                            on ? "border-tt-600 bg-tt-600 text-white" : "border-tt-300 bg-white text-tt-600 hover:bg-tt-50"
+                          }`}
+                          title={seg ? seg.name : "구간 없음"}
+                        >
+                          {c.name || "(이름없음)"}
+                          {seg ? ` · ${seg.name}` : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {clash && (
+                    <p className="mt-2 text-xs font-semibold text-amber-700">
+                      고른 반들이 같은 요일에 옵니다. 그 요일은 먼저 고른 반의 시간표만 나옵니다.
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         )}
       </Card>
 
