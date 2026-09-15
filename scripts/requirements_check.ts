@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildLectures, defaultData, DEFAULT_GEN, generateSlots, buildSolveRequest, comboLimitOf, dayGroups, fixedCellNames, allowedDaysOf, classCapacity, programRoomOf, validate, migrate } from "../src/store";
 import { calendarPeriods, changeDays, changeSlots, dayPeriods, scopeData, mergeSolved } from "../src/calendar";
-import { buildGrids, conflictsOf, draftForOwner, fits, freeTeachersAt, fromSolveResult, mergedGrid, newAssignment, periodsCovered, teacherBusyAt } from "../src/assignments";
+import { buildGrids, classLabelOf, teamOnly, conflictsOf, draftForOwner, fits, freeTeachersAt, fromSolveResult, mergedGrid, newAssignment, periodsCovered, teacherBusyAt } from "../src/assignments";
 import { sampleData } from "../src/sample";
 import { solve } from "../src/solver";
 import { applyRotation, previewRotation, previewUndo, rotateAssignments, undoRotation } from "../src/rotation";
@@ -627,6 +627,37 @@ await check("미지정 칸에 넣을 수 있는 강사만 고르게 한다", () 
   const block = newAssignment({ id: "blk", classId: "K1", subject: "Adventure", day: 0, period: 0, length: 2 });
   const busyAtSecond = [newAssignment({ classId: "K2", subject: "X", teacherId: "T1", day: 0, period: 1 })];
   assert.equal(teacherBusyAt(data, busyAtSecond, "T1", 0, periodsCovered(block), "blk"), "TEAM B X");
+});
+
+await check("강사별·체험존별 시간표에는 따로 정한 반 표기를 쓴다 (체험반 표는 그대로)", () => {
+  const data: AppData = {
+    ...defaultData(),
+    fixedActivities: [],
+    classes: [
+      { id: "K1", name: "3학년 TEAM A", label: "TEAM A" },
+      { id: "K2", name: "5학년 TEAM B" },
+    ],
+    teachers: [{ id: "T1", name: "Teresa", unavailable: [] }],
+    rooms: [{ id: "R1", name: "204" }],
+    courses: [],
+    timetable: [],
+  };
+  const list = [
+    newAssignment({ id: "a", classId: "K1", subject: "Cooking", teacherId: "T1", roomId: "R1", day: 0, period: 1 }),
+    newAssignment({ id: "b", classId: "K2", subject: "Art", teacherId: "T1", roomId: "R1", day: 1, period: 1 }),
+  ];
+  const g = buildGrids(data, list);
+  const top = (grid: ReturnType<typeof buildGrids>["byTeacher"], id: string, d: number) => (grid.get(id)![1][d] as { top: string }).top;
+  assert.equal(top(g.byTeacher, "T1", 0), "TEAM A");
+  assert.equal(top(g.byRoom, "R1", 0), "TEAM A");
+  assert.equal(top(g.byTeacher, "T1", 1), "5학년 TEAM B", "표기가 없으면 체험반 이름");
+  assert.equal((g.byClass.get("K1")![1][0] as { top: string }).top, "Cooking");
+  assert.equal(classLabelOf({ name: "X", label: "  " }), "X");
+  assert.equal(teamOnly("3학년 TEAM A"), "TEAM A");
+  assert.equal(teamOnly("남원 team  c (월·화)"), "team c");
+  assert.equal(teamOnly("1반"), "1반");
+  // 저장·불러오기에서 유지된다.
+  assert.equal(migrate(JSON.parse(JSON.stringify(data)))!.classes[0].label, "TEAM A");
 });
 
 console.log(`\n${count}개 요구사항 회귀 검사 통과`);

@@ -76,6 +76,13 @@ export default function SlotsPanel({ data, set }: Props) {
               onChange={(e) => set((d) => ({ ...d, schoolName: e.target.value }))}
             />
           </Field>
+          <Field label="센터 영어 이름 (영어 화면·영어 엑셀 머리글)" hint="비우면 영어 화면에서는 센터 이름 없이 Timetable 로만 표시합니다.">
+            <TextInput
+              value={data.schoolNameEn ?? ""}
+              placeholder="예) Namwon English Experience Center"
+              onChange={(e) => set((d) => ({ ...d, schoolNameEn: e.target.value }))}
+            />
+          </Field>
           <Field label="운영 요일">
             <div className="flex flex-wrap gap-1.5 pt-1">
               {ALL_DAYS.map((day) => {

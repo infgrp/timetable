@@ -1,5 +1,7 @@
 import type { AppData } from "./types";
 import { migrate } from "./store";
+import { translate } from "./i18n";
+import type { Lang } from "./i18n";
 
 /**
  * 공유 시간표 — center-today 서버(Cloudflare Workers + D1)에 한 벌을 둔다.
@@ -11,7 +13,7 @@ import { migrate } from "./store";
  */
 
 /** center-today 안에서 빌드됐는가 (npm run build:center) */
-export const SHARED = import.meta.env.BASE_URL === "/timetable/";
+export const SHARED = import.meta.env?.BASE_URL === "/timetable/"; // 검사 스크립트(node)에는 env 가 없다
 /** 예전 Vercel 주소로 열었는가 — 새 주소로 안내한다 */
 export const MOVED = typeof location !== "undefined" && location.hostname.endsWith("vercel.app");
 export const CENTER_URL = "https://center-today.infgrp.workers.dev";
@@ -109,16 +111,21 @@ export const publishShared = (code: string, data: AppData, revision: number, pas
   });
 
 /** 시간표 파일 한 줄 요약 — 올리기 전에 맞는 파일인지 확인하게 */
-export function summary(d: AppData): string {
-  return `${d.schoolName || "이름 없음"} · 체험반 ${d.classes.length} · 강사 ${d.teachers.length} · 배치된 수업 ${d.timetable.length}칸`;
+export function summary(d: AppData, lang: Lang = "ko"): string {
+  const school = (lang === "en" ? d.schoolNameEn?.trim() : "") || d.schoolName || translate(lang, "이름 없음");
+  return translate(lang, "{school} · 체험반 {classes} · 강사 {teachers} · 배치된 수업 {cells}칸", {
+    school,
+    classes: d.classes.length,
+    teachers: d.teachers.length,
+    cells: d.timetable.length,
+  });
 }
 
-export function timeAgo(iso: string | null): string {
+export function timeAgo(iso: string | null, lang: Lang = "ko"): string {
   if (!iso) return "";
   const t = new Date(iso);
   const mins = Math.round((Date.now() - t.getTime()) / 60000);
-  if (mins < 1) return "방금";
-  if (mins < 60) return `${mins}분 전`;
-  const date = t.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return date;
+  if (mins < 1) return translate(lang, "방금");
+  if (mins < 60) return translate(lang, "{n}분 전", { n: mins });
+  return t.toLocaleString(lang === "en" ? "en-US" : "ko-KR", { timeZone: "Asia/Seoul", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
 }

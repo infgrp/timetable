@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AppData, Klass } from "../types";
 import { allowedDaysOf, newClassGroup, newSegment, uid } from "../store";
+import { teamOnly } from "../assignments";
 import { Button, Card, Empty, Field, Select, TextInput } from "./ui";
 
 type Props = { data: AppData; set: (fn: (d: AppData) => AppData) => void };
@@ -279,6 +280,55 @@ export default function ClassesPanel({ data, set }: Props) {
           </div>
         )}
       </Card>
+
+      {data.classes.length > 0 && (
+        <Card
+          title="강사별·체험존별 시간표의 반 표기"
+          desc="체험반 이름과 다르게 적을 수 있습니다. 강사별·체험존별 시간표(화면·엑셀·인쇄)에만 쓰이고, 체험반 시간표와 배치에는 영향이 없습니다. 비워 두면 체험반 이름을 그대로 씁니다."
+          right={
+            <div className="flex flex-wrap gap-2">
+              <Button
+                onClick={() =>
+                  set((d) => ({ ...d, classes: d.classes.map((c) => ({ ...c, label: teamOnly(c.name) === c.name ? "" : teamOnly(c.name) })) }))
+                }
+              >
+                TEAM 이름만
+              </Button>
+              <Button onClick={() => set((d) => ({ ...d, classes: d.classes.map((c) => ({ ...c, label: "" })) }))}>
+                체험반 이름 그대로
+              </Button>
+            </div>
+          }
+        >
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {data.classes.map((c) => {
+              const seg = data.segments.find((s) => s.id === c.segmentId);
+              return (
+                <label key={c.id} className="flex items-center gap-2 text-sm">
+                  <span className="w-32 shrink-0 truncate text-tt-600" title={c.name}>
+                    {c.name || "(이름없음)"}
+                    {seg ? <span className="text-xs text-tt-400"> · {seg.name}</span> : null}
+                  </span>
+                  <span className="text-tt-400" aria-hidden="true">
+                    →
+                  </span>
+                  <TextInput
+                    value={c.label ?? ""}
+                    placeholder={c.name || "(이름없음)"}
+                    aria-label={`${c.name || "(이름없음)"} 강사·체험존 시간표 표기`}
+                    onChange={(e) =>
+                      set((d) => ({
+                        ...d,
+                        classes: d.classes.map((x) => (x.id === c.id ? { ...x, label: e.target.value } : x)),
+                      }))
+                    }
+                  />
+                </label>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       <Card
         title={`체험반 묶음 (${(data.classGroups ?? []).length}개)`}

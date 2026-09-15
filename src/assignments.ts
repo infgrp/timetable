@@ -452,10 +452,22 @@ export function mergedGrid(
   return { grid, bands, overlap };
 }
 
+/** 강사별·체험존별 시간표에 적는 반 표기 */
+export function classLabelOf(c: { name: string; label?: string }): string {
+  return c.label?.trim() || c.name || "(이름없음)";
+}
+
+/** "3학년 TEAM A" → "TEAM A". TEAM 이 없으면 원래 이름. */
+export function teamOnly(name: string): string {
+  const m = name.match(/TEAM\s*[A-Za-z0-9가-힣]+/i);
+  return m ? m[0].replace(/\s+/, " ") : name;
+}
+
 export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<string>): Grids {
   const periods = calendarPeriods(data);
   const teacherName = new Map(data.teachers.map((t) => [t.id, t.name || "(이름없음)"]));
-  const className = new Map(data.classes.map((c) => [c.id, c.name || "(이름없음)"]));
+  // 강사·체험존 표에는 따로 정한 반 표기가 있으면 그것을 쓴다(체험반 표의 칸에는 반 이름이 나오지 않는다).
+  const classLabel = new Map(data.classes.map((c) => [c.id, classLabelOf(c)]));
   const roomName = new Map(data.rooms.map((r) => [r.id, r.name || "(이름없음)"]));
 
   const blank = (): Grid => Array.from({ length: periods.length }, () => new Array(data.days.length).fill(null));
@@ -510,14 +522,14 @@ export function buildGrids(data: AppData, list: Assignment[], badIds?: Set<strin
     for (const tid of teachersOf(a))
       put(byTeacher.get(tid), a, {
         ...base,
-        top: className.get(a.classId) ?? "(삭제된 체험반)",
+        top: classLabel.get(a.classId) ?? "(삭제된 체험반)",
         // 강사 개인 표에는 teacherSubject(예: "Adventure ①")를 우선 쓴다.
         bottom: [a.teacherSubject?.trim() || a.subject, room].filter(Boolean).join(" · "),
       });
     if (a.roomId)
       put(byRoom.get(a.roomId), a, {
         ...base,
-        top: className.get(a.classId) ?? "(삭제된 체험반)",
+        top: classLabel.get(a.classId) ?? "(삭제된 체험반)",
         bottom: [a.subject, shownTeacher].filter(Boolean).join(" · "),
       });
   }

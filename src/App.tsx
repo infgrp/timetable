@@ -14,6 +14,7 @@ import { Button } from "./components/ui";
 import { ConnectCard, MovedNotice, PublishDialog } from "./components/SharedPanel";
 import { ApiError, MOVED, SHARED, fetchShared, readCache, readCode, summary, timeAgo, validCode, writeCode } from "./shared";
 import type { Snapshot } from "./shared";
+import { useI18n } from "./i18n";
 
 const TABS = [
   { id: "time", label: "운영 시간" },
@@ -34,7 +35,10 @@ export default function App() {
 /** 공유 시간표를 다시 받는 주기. 시간표는 자주 바뀌지 않는다. */
 const REFRESH_MS = 60_000;
 
+const LINK = "inline-flex items-center justify-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50";
+
 function Main() {
+  const { lang, t, setLang } = useI18n();
   const [data, setData] = useState<AppData>(() => load());
   // 공유 시간표 (center-today 안에서만)
   const [code, setCode] = useState(() => (SHARED ? readCode() : ""));
@@ -89,6 +93,15 @@ function Main() {
 
   // 보기 화면: 공유 시간표가 있으면 그것, 없으면 이 기기에서 구성한 것
   const viewData = SHARED && shared?.data ? shared.data : data;
+  const headData = mode === "view" ? viewData : data;
+  const heading =
+    lang === "en"
+      ? [headData.schoolNameEn?.trim(), t("시간표")].filter(Boolean).join(" ")
+      : `${headData.schoolName || "영어체험센터"} 시간표`;
+
+  useEffect(() => {
+    document.title = lang === "en" ? heading : `${headData.schoolName || "영어체험센터"} 시간표`;
+  }, [lang, heading, headData.schoolName]);
 
   const importJson = (file: File) => {
     file
@@ -104,72 +117,76 @@ function Main() {
   return (
     <div className="min-h-full">
       <header className="no-print border-b border-tt-200 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-5 py-3">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <div className="flex items-center gap-4">
             <div>
-              <h1 className="text-lg font-bold text-tt-800">
-                {(mode === "view" ? viewData : data).schoolName || "영어체험센터"} 시간표
-              </h1>
+              <h1 className="text-lg font-bold text-tt-800">{heading}</h1>
               <p className="text-xs text-tt-500">
                 {!SHARED
-                  ? "이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다."
+                  ? t("이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다.")
                   : !code
-                    ? "공유 공간에 연결하면 관리자가 올린 시간표를 봅니다."
+                    ? t("공유 공간에 연결하면 관리자가 올린 시간표를 봅니다.")
                     : mode === "build"
-                      ? "구성은 이 기기에 저장됩니다. 다 되면 공유에 올리세요."
+                      ? t("구성은 이 기기에 저장됩니다. 다 되면 공유에 올리세요.")
                       : shared?.data
-                        ? `공유 시간표 · ${timeAgo(shared.updatedAt)} 올림${sharedError ? " · 연결 끊김, 마지막으로 받은 시간표" : ""}`
-                        : "아직 공유된 시간표가 없습니다. 이 기기에서 구성한 시간표를 보여 줍니다."}
+                        ? `${t("공유 시간표 · {ago} 올림", { ago: timeAgo(shared.updatedAt, lang) })}${sharedError ? t(" · 연결 끊김, 마지막으로 받은 시간표") : ""}`
+                        : t("아직 공유된 시간표가 없습니다. 이 기기에서 구성한 시간표를 보여 줍니다.")}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {/* 큰 두 갈래 — 보기가 기본이고, 만드는 일은 안쪽으로 넣는다. */}
-            <div className="flex rounded-lg border border-tt-300 p-0.5">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+            {/* 큰 두 갈래 — 보기가 기본이고, 만드는 일은 안쪽으로 넣는다.
+                휴대폰에서는 시간표 폭만큼 고르게 편다(2026-09-15 요청). */}
+            <div className="grid grid-cols-2 rounded-lg border border-tt-300 p-0.5 sm:flex">
               {(["view", "build"] as const).map((m) => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => setMode(m)}
-                  className={`rounded-md px-3 py-1.5 text-sm font-bold transition ${
+                  className={`rounded-md px-3 py-2 text-sm font-bold transition sm:py-1.5 ${
                     mode === m ? "bg-tt-600 text-white" : "text-tt-600 hover:bg-tt-50"
                   }`}
                 >
-                  {m === "view" ? "시간표 보기" : "시간표 구성하기"}
+                  {m === "view" ? t("시간표 보기") : t("시간표 구성하기")}
                 </button>
               ))}
             </div>
-            {SHARED && (
-              <a
-                href="../"
-                className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
-              >
-                오늘 현황
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+              {SHARED && (
+                <a href="../" className={LINK}>
+                  {t("오늘 현황")}
+                </a>
+              )}
+              {SHARED && code && (
+                <button type="button" onClick={() => setPublishing(true)} className={LINK}>
+                  {t("공유에 올리기")}
+                </button>
+              )}
+              <a href={`${import.meta.env.BASE_URL}manual.pdf`} target="_blank" rel="noreferrer" className={LINK}>
+                {t("사용 설명서")}
               </a>
-            )}
-            {SHARED && code && (
               <button
                 type="button"
-                onClick={() => setPublishing(true)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
+                lang={lang === "en" ? "ko" : "en"}
+                onClick={() => setLang(lang === "en" ? "ko" : "en")}
+                className={LINK}
+                aria-label={lang === "en" ? "한국어로 보기" : "View in English"}
+                title={lang === "en" ? "한국어로 보기" : "View in English"}
               >
-                공유에 올리기
+                {lang === "en" ? "한국어" : "EN"}
               </button>
-            )}
-            <a
-              href={`${import.meta.env.BASE_URL}manual.pdf`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
-            >
-              사용 설명서
-            </a>
+            </div>
           </div>
         </div>
 
         {mode === "build" && (
           <>
+            {lang === "en" && (
+              <p className="mx-auto max-w-7xl px-5 pb-2 text-sm text-amber-800">
+                {t("시간표 구성 화면은 한국어로만 제공됩니다. 시간표 보기는 영어로 볼 수 있습니다.")}
+              </p>
+            )}
             <div className="mx-auto flex max-w-7xl flex-wrap justify-end gap-2 px-5 pb-2">
               <Button
                 onClick={() => {
@@ -257,7 +274,7 @@ function Main() {
         )}
         {SHARED && code && sharedError && mode === "view" && (
           <p className="no-print mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="status">
-            {sharedError}
+            {t(sharedError)}
           </p>
         )}
         {publishing && (

@@ -14,6 +14,7 @@
     "import:check": "esbuild scripts/import_check.ts --bundle --platform=node --format=esm --outfile=scripts/import_check.mjs --log-level=warning && node scripts/import_check.mjs",
     "render:check": "esbuild scripts/render_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/render_check.mjs --log-level=warning && node scripts/render_check.mjs",
     "requirements:check": "esbuild scripts/requirements_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/requirements_check.mjs --log-level=warning && node scripts/requirements_check.mjs",
+    "i18n:check": "esbuild scripts/i18n_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/i18n_check.mjs --log-level=warning && node scripts/i18n_check.mjs",
     "manual": "node scripts/manual.mjs",
     "sample": "esbuild scripts/english_center.ts --bundle --platform=node --format=esm --outfile=scripts/english_center.mjs --log-level=warning && node scripts/english_center.mjs"
   },

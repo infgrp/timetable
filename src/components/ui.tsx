@@ -34,6 +34,8 @@ type BtnProps = {
   disabled?: boolean;
   title?: string;
   type?: "button" | "submit";
+  /** 휴대폰에서 칸 폭을 꽉 채우고 글자를 가운데로 (넓은 화면에서는 보통 크기) */
+  wide?: boolean;
 };
 
 export function Button({
@@ -43,6 +45,7 @@ export function Button({
   disabled,
   title,
   type = "button",
+  wide,
 }: BtnProps) {
   const base =
     "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-45";
@@ -52,7 +55,7 @@ export function Button({
     danger: "border border-red-300 bg-white text-red-600 hover:bg-red-50",
   }[variant];
   return (
-    <button type={type} className={`${base} ${styles}`} onClick={onClick} disabled={disabled} title={title}>
+    <button type={type} className={`${base} ${styles}${wide ? " w-full justify-center sm:w-auto" : ""}`} onClick={onClick} disabled={disabled} title={title}>
       {children}
     </button>
   );

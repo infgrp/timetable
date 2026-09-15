@@ -2,11 +2,13 @@ import type { DragEvent } from "react";
 import type { DaySlot } from "../types";
 import type { EditHooks, Grid } from "./Timetable";
 import { scheduleRows } from "../scheduleLayout";
+import { useI18n } from "../i18n";
 
 export default function DailyTimetableBody({ days, slots, daySlots, grid, edit }: {
   days: string[]; slots: DaySlot[]; daySlots: Record<string, DaySlot[]>; grid: Grid; edit?: EditHooks;
 }) {
-  return <tbody>{scheduleRows(days, slots, daySlots, grid).map((row, r) => <tr key={r}>
+  const { lang } = useI18n();
+  return <tbody>{scheduleRows(days, slots, daySlots, grid, lang).map((row, r) => <tr key={r}>
     <th className="border border-tt-200 bg-tt-50 px-1 py-1 text-xs text-tt-600">{row.label}</th>
     {row.entries.map((entry, d) => {
       if (entry.continuation) return null;

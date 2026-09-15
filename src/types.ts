@@ -22,6 +22,11 @@ export type Klass = {
   id: string;
   name: string;
   /**
+   * 강사별·체험존별 시간표에 적는 반 표기. 비우면 name 을 쓴다.
+   * 체험반 이름은 "3학년 TEAM A" 처럼 길게 두고, 강사 표에는 "TEAM A" 만 적고 싶을 때 (2026-09-15 요청).
+   */
+  label?: string;
+  /**
    * 소속 운영 구간. null·undefined 면 모든 운영 요일에 올 수 있다.
    * 월·화에 오는 학년과 수·목·금에 오는 학년이 다를 때 나눈다.
    */
@@ -208,6 +213,8 @@ export type RotationConfig = {
 export type AppData = {
   version: 3;
   schoolName: string;
+  /** 영어 화면에 쓰는 센터 이름. 비우면 영어 화면에서는 센터 이름을 붙이지 않는다. */
+  schoolNameEn?: string;
   days: string[];
   slots: DaySlot[];
   /** 요일별 하루 구성. 생략한 요일은 공통 slots를 사용한다. */

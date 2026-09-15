@@ -14,6 +14,8 @@ export function toSheet(opts: {
   daySlots?: Record<string, DaySlot[]>;
   /** 요일 머리 위에 얹는 묶음 줄 (합본 시간표) */
   bands?: { label: string; span: number }[];
+  /** 머리글·교시 줄 언어 (영어 화면에서 받을 때) */
+  lang?: "ko" | "en";
 }): XSheet {
   const { days, slots, grid } = opts;
   const cols = days.length + 1;
@@ -46,13 +48,13 @@ export function toSheet(opts: {
 
   // 머리글
   const head = blankRow();
-  head[0] = { text: "교시", style: "header" };
+  head[0] = { text: opts.lang === "en" ? "Period" : "교시", style: "header" };
   days.forEach((d, i) => (head[i + 1] = { text: d, style: "header" }));
   rows.push(head);
   rowHeights.push(22);
 
   if (opts.daySlots && days.some((d) => opts.daySlots?.[d])) {
-    for (const layout of scheduleRows(days, slots, opts.daySlots, grid)) {
+    for (const layout of scheduleRows(days, slots, opts.daySlots, grid, opts.lang)) {
       const r = rows.length;
       const row = blankRow();
       row[0] = { text: layout.label, style: "timeCol" };
@@ -67,7 +69,7 @@ export function toSheet(opts: {
         if (entry.span > 1) merges.push({ r1: r, c1: d + 1, r2: r + entry.span - 1, c2: d + 1 });
       });
       rows.push(row);
-      rowHeights.push(layout.label === "휴식" ? 28 : 48);
+      rowHeights.push(layout.kind === "break" ? 28 : 48);
     }
     return { name: safeSheetName(opts.sheetName, "시간표"), colWidths: [11, ...days.map(() => 20)], rows, rowHeights, merges };
   }

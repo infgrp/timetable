@@ -2,10 +2,10 @@ import type { DaySlot } from "./types";
 import type { Cell, Grid } from "./components/Timetable";
 
 export type LayoutEntry = { slot: DaySlot | null; period: number | null; cell: Cell | null; continuation: boolean; span: number };
-export type LayoutRow = { label: string; entries: LayoutEntry[] };
+export type LayoutRow = { label: string; kind: "break" | "period"; entries: LayoutEntry[] };
 
 /** 요일별 점심 위치의 합집합으로 행을 만든다. 다른 요일의 점심 행도 블록 병합 길이에 포함한다. */
-export function scheduleRows(days: string[], slots: DaySlot[], daySlots: Record<string, DaySlot[]>, grid: Grid): LayoutRow[] {
+export function scheduleRows(days: string[], slots: DaySlot[], daySlots: Record<string, DaySlot[]>, grid: Grid, lang: "ko" | "en" = "ko"): LayoutRow[] {
   const columns = days.map((day) => {
     const periods: DaySlot[] = [];
     const breaks = new Map<number, DaySlot>();
@@ -23,11 +23,11 @@ export function scheduleRows(days: string[], slots: DaySlot[], daySlots: Record<
   const periodRows: number[] = [];
   for (let p = 0; p <= count; p++) {
     if (columns.some((c) => c.breaks.has(p))) rows.push({
-      label: "휴식", entries: columns.map((c) => ({ slot: c.breaks.get(p) ?? null, period: null, cell: null, continuation: false, span: 1 })),
+      label: lang === "en" ? "Break" : "휴식", kind: "break", entries: columns.map((c) => ({ slot: c.breaks.get(p) ?? null, period: null, cell: null, continuation: false, span: 1 })),
     });
     if (p === count) break;
     periodRows[p] = rows.length;
-    rows.push({ label: `${p + 1}교시`, entries: columns.map((c, d) => ({
+    rows.push({ label: lang === "en" ? `Period ${p + 1}` : `${p + 1}교시`, kind: "period", entries: columns.map((c, d) => ({
       slot: c.periods[p] ?? null, period: p,
       cell: grid[p]?.[d] && grid[p][d] !== "cont" ? grid[p][d] as Cell : null,
       continuation: grid[p]?.[d] === "cont", span: 1,

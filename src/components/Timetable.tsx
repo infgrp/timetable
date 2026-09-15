@@ -1,6 +1,7 @@
 import type { DragEvent } from "react";
 import type { DaySlot } from "../types";
 import DailyTimetableBody from "./DailyTimetableBody";
+import { useI18n } from "../i18n";
 
 export type Cell = {
   top: string;
@@ -56,9 +57,10 @@ export default function Timetable({
   /** 요일 머리 위에 얹는 묶음 줄 (합본에서 LOW(3학년) | HIGH(5학년) 처럼 쓴다) */
   bands?: { label: string; span: number }[];
 }) {
+  const { t } = useI18n();
   let periodIndex = -1;
   return (
-    <div className="print-page break-inside-avoid rounded-xl border border-tt-200 bg-white p-4 shadow-sm print-tight">
+    <div className="print-page min-w-0 break-inside-avoid rounded-xl border border-tt-200 bg-white p-4 shadow-sm print-tight">
       <div className="mb-2 flex items-baseline gap-2">
         <h3 className="text-base font-bold text-tt-800">{title}</h3>
         {subtitle && <span className="text-xs text-tt-500">{subtitle}</span>}
@@ -87,7 +89,7 @@ export default function Timetable({
               </tr>
             )}
             <tr>
-              <th className="border border-tt-200 bg-tt-50 px-1 py-1 text-xs text-tt-600">교시</th>
+              <th className="border border-tt-200 bg-tt-50 px-1 py-1 text-xs text-tt-600">{t("교시")}</th>
               {days.map((d) => (
                 <th key={d} className="border border-tt-200 bg-tt-100 px-2 py-1.5 font-bold text-tt-800">
                   {d}
