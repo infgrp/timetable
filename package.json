@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:center": "tsc -b && vite build --base=/timetable/ --outDir ../center-today/public/timetable --emptyOutDir",
     "preview": "vite preview",
     "bench": "esbuild scripts/bench.ts --bundle --platform=node --format=esm --outfile=scripts/bench.mjs --log-level=warning && node scripts/bench.mjs",
     "stress": "esbuild scripts/stress.ts --bundle --platform=node --format=esm --outfile=scripts/stress.mjs --log-level=warning && node scripts/stress.mjs",

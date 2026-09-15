@@ -1,10 +1,25 @@
 # 영어체험센터 시간표 작성기
 
-**https://timetable-chi-ten.vercel.app**
+**https://center-today.infgrp.workers.dev/timetable/** (센터 투데이와 같은 주소·같은 접속 코드)
+
+예전 주소 timetable-chi-ten.vercel.app 은 새 주소 안내 화면만 보여 준다. 그 기기에 만들던 시간표가 있으면 설정 파일로 받아 갈 수 있다.
 
 강사·프로그램·시수·회피 시간을 입력하면 **체험반별 시간표를 자동으로 배치**하는 웹앱.
 체험존이 같은 교시에 겹치지 않도록 잡아 주는 것이 핵심이다.
-백엔드가 없고, 입력한 내용은 브라우저(localStorage)에만 남는다.
+구성 중인 내용은 브라우저(localStorage)에 남고, 관리자가 **공유에 올리기**를 하면 센터 모두가 같은 시간표를 본다.
+
+## 공유 시간표
+
+| | 누가 | 어떻게 |
+| --- | --- | --- |
+| 보기 | 공유 공간 접속 코드가 있는 사람 | 센터 투데이 `시간표` 탭, 또는 `/timetable/` 을 열고 코드 입력(센터 투데이에서 연결했으면 자동) |
+| 올리기 | 센터 공용 비밀번호를 아는 관리자 | 오른쪽 위 `공유에 올리기` → 이 기기에서 구성한 시간표 또는 `시간표설정_*.json` → 비밀번호 |
+| 고치기 | 관리자 | `시간표 구성하기 → 공유 시간표 가져오기` 로 가져와 고친 뒤 다시 올리기 |
+
+- 저장: center-today 서버(Cloudflare Workers + D1)의 `timetables` 표, 공유 공간마다 한 벌. API `GET/PUT /api/timetable`.
+- 보기 화면은 1분마다·화면 복귀 시 새로 받고, 마지막으로 받은 시간표를 기기에 남겨 연결이 끊겨도 보여 준다.
+- 두 관리자가 겹쳐 올리면 나중 사람에게 알리고(버전 비교) 확인 후 덮어쓰게 한다.
+- 코드 위치: `src/shared.ts`(API·캐시), `src/components/SharedPanel.tsx`(연결 카드·올리기 창·이전 주소 안내).
 
 화면은 두 갈래다. 앱을 열면 **시간표 보기**가 먼저 나오고, 만들고 고치는 일은 **시간표 구성하기** 안에 있다.
 
@@ -25,7 +40,7 @@
 방문형이면 빈 칸이 많이 남는데, 그건 경고 한 줄로만 알리고 배치는 그대로 진행한다.
 
 현장에서 쓰는 분들을 위한 **사용 설명서**는 앱 오른쪽 위 `[사용 설명서]` 버튼이나
-[timetable-chi-ten.vercel.app/manual.pdf](https://timetable-chi-ten.vercel.app/manual.pdf) 에 있다.
+[center-today.infgrp.workers.dev/timetable/manual.pdf](https://center-today.infgrp.workers.dev/timetable/manual.pdf) 에 있다.
 원본은 `docs/manual.tex`(XeLaTeX), 결과물은 `public/manual.pdf` 로 커밋해 배포한다.
 
 ## 용어
@@ -331,4 +346,12 @@ npm install
 npm run dev
 ```
 
-Vercel에 그대로 올라간다(빌드 `npm run build`, 출력 `dist`). 서버·환경변수 없음.
+배포는 center-today 쪽에서 한다.
+
+```bash
+npm run build:center          # ../center-today/public/timetable/ 로 빌드 (base /timetable/)
+cd ../center-today && npm run build && npm run deploy
+```
+
+`npm run build`(Vercel)은 그대로 두지만, vercel.app 주소에서는 새 주소 안내만 보인다.
+로컬 `npm run dev` 는 공유 없이 이 기기 저장만으로 돈다. 공유까지 보려면 center-today 의 `npm run dev` 에서 `/timetable/` 을 연다.

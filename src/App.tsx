@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AppData } from "./types";
 import { defaultData, load, migrate, save } from "./store";
 import { sampleData } from "./sample";
@@ -11,6 +11,9 @@ import ResultPanel from "./components/ResultPanel";
 import RotationPanel from "./components/RotationPanel";
 import ViewerPanel from "./components/ViewerPanel";
 import { Button } from "./components/ui";
+import { ConnectCard, MovedNotice, PublishDialog } from "./components/SharedPanel";
+import { ApiError, MOVED, SHARED, fetchShared, readCache, readCode, summary, timeAgo, validCode, writeCode } from "./shared";
+import type { Snapshot } from "./shared";
 
 const TABS = [
   { id: "time", label: "운영 시간" },
@@ -25,7 +28,19 @@ type TabId = (typeof TABS)[number]["id"];
 type Mode = "view" | "build";
 
 export default function App() {
+  return MOVED ? <MovedNotice /> : <Main />;
+}
+
+/** 공유 시간표를 다시 받는 주기. 시간표는 자주 바뀌지 않는다. */
+const REFRESH_MS = 60_000;
+
+function Main() {
   const [data, setData] = useState<AppData>(() => load());
+  // 공유 시간표 (center-today 안에서만)
+  const [code, setCode] = useState(() => (SHARED ? readCode() : ""));
+  const [shared, setShared] = useState<Snapshot | null>(() => (SHARED && code ? readCache(code) : null));
+  const [sharedError, setSharedError] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [mode, setMode] = useState<Mode>("view");
   const [tab, setTab] = useState<TabId>("time");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -35,6 +50,45 @@ export default function App() {
   }, [data]);
 
   const set = (fn: (d: AppData) => AppData) => setData(fn);
+
+  const refreshShared = useCallback(async (): Promise<Snapshot | null> => {
+    if (!SHARED || !code) return null;
+    try {
+      const snap = await fetchShared(code);
+      setShared(snap);
+      setSharedError("");
+      return snap;
+    } catch (e) {
+      const err = e instanceof ApiError ? e : new ApiError(String(e));
+      setSharedError(err.message);
+      if (err.status === 401 || err.status === 404) {
+        // 코드가 틀렸거나 공간이 사라졌다 — 다시 넣게 한다
+        writeCode("");
+        setCode("");
+        setShared(null);
+      }
+      return null;
+    }
+  }, [code]);
+
+  useEffect(() => {
+    if (!SHARED || !code) return;
+    void refreshShared();
+    const timer = setInterval(() => {
+      if (!document.hidden) void refreshShared();
+    }, REFRESH_MS);
+    const onVisible = () => {
+      if (!document.hidden) void refreshShared();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [code, refreshShared]);
+
+  // 보기 화면: 공유 시간표가 있으면 그것, 없으면 이 기기에서 구성한 것
+  const viewData = SHARED && shared?.data ? shared.data : data;
 
   const importJson = (file: File) => {
     file
@@ -54,9 +108,19 @@ export default function App() {
           <div className="flex items-center gap-4">
             <div>
               <h1 className="text-lg font-bold text-tt-800">
-                {data.schoolName || "영어체험센터"} 시간표
+                {(mode === "view" ? viewData : data).schoolName || "영어체험센터"} 시간표
               </h1>
-              <p className="text-xs text-tt-500">이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다.</p>
+              <p className="text-xs text-tt-500">
+                {!SHARED
+                  ? "이 브라우저에만 저장됩니다. 서버로 전송되지 않습니다."
+                  : !code
+                    ? "공유 공간에 연결하면 관리자가 올린 시간표를 봅니다."
+                    : mode === "build"
+                      ? "구성은 이 기기에 저장됩니다. 다 되면 공유에 올리세요."
+                      : shared?.data
+                        ? `공유 시간표 · ${timeAgo(shared.updatedAt)} 올림${sharedError ? " · 연결 끊김, 마지막으로 받은 시간표" : ""}`
+                        : "아직 공유된 시간표가 없습니다. 이 기기에서 구성한 시간표를 보여 줍니다."}
+              </p>
             </div>
           </div>
 
@@ -76,8 +140,25 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {SHARED && (
+              <a
+                href="../"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
+              >
+                오늘 현황
+              </a>
+            )}
+            {SHARED && code && (
+              <button
+                type="button"
+                onClick={() => setPublishing(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
+              >
+                공유에 올리기
+              </button>
+            )}
             <a
-              href="/manual.pdf"
+              href={`${import.meta.env.BASE_URL}manual.pdf`}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg border border-tt-300 bg-white px-3 py-1.5 text-sm font-semibold text-tt-700 transition hover:bg-tt-50"
@@ -109,6 +190,16 @@ export default function App() {
                 내보내기
               </Button>
               <Button onClick={() => fileRef.current?.click()}>불러오기</Button>
+              {SHARED && shared?.data && (
+                <Button
+                  onClick={() => {
+                    if (confirm(`공유 시간표(${summary(shared.data!)})를 이 기기로 가져옵니다. 지금 구성하던 내용은 사라집니다.`))
+                      setData(shared.data!);
+                  }}
+                >
+                  공유 시간표 가져오기
+                </Button>
+              )}
               <input
                 ref={fileRef}
                 type="file"
@@ -151,8 +242,40 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-5 py-6">
+        {SHARED && !code && (
+          <div className="mb-6">
+            <ConnectCard
+              error={sharedError}
+              onConnect={(next) => {
+                if (!validCode(next)) return;
+                writeCode(next);
+                setCode(next);
+                setShared(readCache(next));
+              }}
+            />
+          </div>
+        )}
+        {SHARED && code && sharedError && mode === "view" && (
+          <p className="no-print mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900" role="status">
+            {sharedError}
+          </p>
+        )}
+        {publishing && (
+          <PublishDialog
+            code={code}
+            draft={data}
+            shared={shared}
+            onLatest={refreshShared}
+            onPublished={(snap) => {
+              setShared(snap);
+              setSharedError("");
+              setMode("view");
+            }}
+            onClose={() => setPublishing(false)}
+          />
+        )}
         {mode === "view" ? (
-          <ViewerPanel data={data} onBuild={() => setMode("build")} />
+          <ViewerPanel data={viewData} onBuild={() => setMode("build")} />
         ) : (
           <>
             {tab === "time" && <SlotsPanel data={data} set={set} />}
