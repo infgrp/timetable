@@ -826,6 +826,104 @@ A 선생님이 \textbf{B의 시간표}를, B 선생님이 \textbf{C의 시간표
 \end{warn}
 
 % =====================================================================
+\section{날짜별 배정 --- 혼합과정(3일/3일)}\label{sec:calendar}
+
+기본과정(월\textperiodcentered화 / 수\textperiodcentered목\textperiodcentered금)처럼 \textbf{해마다 같은 요일에 같은 시간표}가 도는 운영은
+\ref{sec:segment}절의 운영 구간만으로 충분합니다. 그러나 \textbf{혼합과정}처럼 3일씩 이어 붙여 도는 운영은
+한 주만 지나도 요일이 밀리므로, 요일 하나로 시간표를 짤 수 없습니다. 이럴 때 쓰는 기능입니다.
+
+\begin{center}
+\begin{tabularx}{0.92\linewidth}{@{}>{\hd{}}c *{5}{X}@{}}
+\toprule
+주 & 월 & 화 & 수 & 목 & 금 \\
+\midrule
+1주 & 5\textperiodcentered6학년 1일차 & 5\textperiodcentered6학년 2일차 & 5\textperiodcentered6학년 3일차 & 3\textperiodcentered4학년 1일차 & 3\textperiodcentered4학년 2일차 \\
+2주 & 3\textperiodcentered4학년 3일차 & 5\textperiodcentered6학년 1일차 & 5\textperiodcentered6학년 2일차 & 5\textperiodcentered6학년 3일차 & 3\textperiodcentered4학년 1일차 \\
+\bottomrule
+\end{tabularx}\\[4pt]
+{\footnotesize\sffamily\color{ttgray} 3일씩 이어 붙이므로 둘째 주부터 요일이 하루씩 밀립니다.}
+\end{center}
+
+시간표는 요일 대신 \textbf{일차}(\code{5·6학년 1일차} \textrightarrow{} \ldots \textrightarrow{} \code{3·4학년 3일차})로
+\textbf{한 번만} 짜 두면, 시작 날짜와 쉬는 날만 정해도 \textbf{날짜마다 몇 일차인지 자동으로} 정해집니다.
+
+\subsection{일차 틀 만들기}
+
+\tab{시간표 구성하기}의 \tab{날짜별 배정} 탭에서 시작합니다.
+
+\begin{enumerate}
+  \item \field{먼저 오는 묶음}과 \field{다음 묶음}의 이름을 적습니다(예: \code{5·6학년}, \code{3·4학년}).
+  \item \field{묶음마다 며칠}을 고릅니다(3일/3일이면 \code{3일}).
+  \item \btn{3일/3일 틀 만들기}를 누릅니다.
+\end{enumerate}
+
+\begin{danger}
+틀을 만들면 \tab{운영 시간}의 요일이 \textbf{일차 이름으로 통째로 바뀌고},
+\tab{체험반·구간}에 두 구간이 새로 생깁니다.
+지금 요일에 놓인 \textbf{수업·고정 활동·강사 회피 시간은 요일 이름을 잃으므로 함께 지워집니다.}
+이미 짜 둔 시간표가 있다면 틀을 만들기 전에 \btn{내보내기}로 먼저 저장해 두세요.
+\end{danger}
+
+틀을 만든 뒤에는 다음 순서로 채웁니다.
+
+\begin{enumerate}
+  \item \tab{체험반·구간}에서 각 반이 어느 구간(묶음)인지 고릅니다.
+  \item Orientation\textperiodcentered{}Closing 같은 \hyperref[sec:fixed]{고정 활동}을 \textbf{일차에 맞춰} 다시 넣습니다
+        (1일차 1교시에 Orientation, 마지막 일차 마지막 교시에 Closing처럼).
+  \item \tab{프로그램 배정}\textperiodcentered{}\tab{시간표 짜기}는 예전과 똑같이 합니다.
+        요일 대신 일차를 하나의 축으로 볼 뿐, 배치 방식은 달라지지 않습니다.
+\end{enumerate}
+
+\subsection{날짜 정하기}
+
+같은 탭 안, \tab{2. 날짜}에서 정합니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+시작 날짜 & 도는 차례의 \textbf{첫 일차}가 오는 날. 운영 요일이어야 합니다. \\
+끝 날짜 & 마지막 방문의 마지막 날. \textbf{비우면 계속} 돕니다. \\
+시작 날짜에 올 일차 & 도는 차례를 어느 일차부터 시작할지 고릅니다. \\
+운영 요일 & 기본은 월\textasciitilde금. 토\textperiodcentered일도 운영한다면 체크하세요. \\
+쉬는 날 & 공휴일\textperiodcentered준비기간. \textbf{건너뛰고 다음 운영일이 그 일차를 이어받습니다.} \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+아래 \tab{3. 미리보기}에 주마다 한 줄로 날짜별 배정이 나옵니다. 묶음(구간)마다 칸 색이 다르니,
+\textbf{센터가 정한 운영표와 같은지} 여기서 확인하세요.
+
+\begin{tip}
+쉬는 날을 넣으면 그날은 건너뛰고 \textbf{다음 운영일이 그 일차를 이어받습니다.}
+예를 들어 3일차 날이 공휴일이면, 그다음 운영일이 3일차가 되고 이후 차례가 하루씩 밀립니다.\\[2pt]
+도는 순서를 반대로 시작하고 싶다면(3\textperiodcentered4학년부터) \field{시작 날짜에 올 일차}에서 고르면 됩니다.
+\end{tip}
+
+\subsection{시간표 보기 --- 주별과 일차별}
+
+날짜별 배정을 켜면 \tab{시간표 보기}에 \tab{보기} 갈래가 생깁니다.
+
+\begin{center}
+\begin{tabularx}{\linewidth}{@{}>{\sffamily\bfseries\color{ttdark}}l X@{}}
+\toprule
+주별 (날짜) & \textbf{기본값.} 실제 달력처럼 \code{10/19 (월)}\textasciitilde\code{10/23 (금)}로 보여 주고,
+  \btn{◀ 이전 주}\textperiodcentered\btn{다음 주 ▶}\textperiodcentered\btn{이번 주}로 넘깁니다.
+  요일 머리 위에 \textbf{그날이 몇 일차인지} 적힙니다. \\
+일차별 (원본) & 시간표를 \textbf{짤 때 쓰는} 원래 모양. 일차 순서 그대로 보여 확인하기 좋습니다. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+체험반별\textperiodcentered강사별\textperiodcentered체험존별 모두 주별로 볼 수 있고, \textbf{엑셀로 받기\textperiodcentered인쇄}도 지금 보고 있는 주 그대로 나옵니다.
+
+\begin{warn}
+시간표는 공간마다 \textbf{한 벌뿐}입니다. 혼합과정 시간표를 짜서 올리면 \textbf{기존 기본과정 시간표를 대신}합니다.
+기존 시간표가 필요하면 올리기 전에 \btn{내보내기}로 저장해 두세요.\\[2pt]
+강사 회피 시간은 \textbf{일차 기준}입니다. ``매주 금요일 오후 쉼''처럼 \textbf{요일이나 날짜 기준으로 반복되는} 휴무는
+아직 따로 지원하지 않으니, 그 일차의 해당 칸을 회피 시간으로 칠해 두세요.
+\end{warn}
+
+% =====================================================================
 \section{내려받기와 인쇄}
 
 시간표는 세 가지로 볼 수 있고, 보고 있는 그대로 받을 수 있습니다.
@@ -942,6 +1040,14 @@ A 선생님이 \textbf{B의 시간표}를, B 선생님이 \textbf{C의 시간표
 \qa{휴대폰이나 태블릿에서도 되나요?}{
   \tab{시간표 보기}는 잘 보입니다. 다만 끌어다 놓아 고치는 작업은 마우스가 있는 컴퓨터가 훨씬 편합니다.}
 
+\qa{3일씩 이어 붙여 도는 혼합과정도 시간표를 만들 수 있나요?}{
+  가능합니다. \ref{sec:calendar}절의 \tab{날짜별 배정}을 쓰세요. 시간표는 요일 대신 일차로 한 번만 짜 두고,
+  시작 날짜와 쉬는 날만 정하면 날짜마다 몇 일차인지 자동으로 정해집니다.}
+
+\qa{날짜별 배정의 3일/3일 틀을 만들면 지금 짜 둔 시간표는 어떻게 되나요?}{
+  요일이 일차 이름으로 통째로 바뀌므로, 그 요일에 붙어 있던 수업\textperiodcentered고정 활동\textperiodcentered강사 회피 시간이 함께 지워집니다.
+  틀을 만들기 전에 \btn{내보내기}로 먼저 저장해 두세요.}
+
 % =====================================================================
 \appendix
 \section{부록 — 관리자용}
@@ -976,6 +1082,8 @@ npm run stress & 30개 반 규모 부하 테스트 \\
 npm run import:check & 엑셀·CSV 왕복, 고정 활동·구간·강사 숨김·로테이션 검증 \\
 npm run render:check & 화면이 실제로 그려지는지 검증 \\
 npm run requirements:check & 요일별 구성, 구간별 생성·보존, 로테이션 회귀 검증 \\
+npm run calendar:check & 날짜별 배정 --- 날짜마다 몇 일차인지 계산이 맞는지 검증 \\
+npm run mixed:check & 혼합과정을 처음부터 끝까지(틀 만들기\textrightarrow{}자동 배치\textrightarrow{}주별 보기) 검증 \\
 npm run manual & 이 설명서를 다시 만들어 \code{public/manual.pdf} 로 넣기 \\
 \bottomrule
 \end{tabularx}
