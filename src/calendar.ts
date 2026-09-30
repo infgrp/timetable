@@ -27,6 +27,8 @@ export function changeDays(data: AppData, days: string[]): AppData {
     teachers: data.teachers.map((t) => ({ ...t, unavailable: cells(t.unavailable) })),
     segments: data.segments.map((s) => ({ ...s, days: s.days.map(remap).filter((d) => d >= 0) })),
     timetable: data.timetable.flatMap((a) => remap(a.day) < 0 ? [] : [{ ...a, day: remap(a.day) }]),
+    // 날짜별 배정의 도는 차례도 일차 번호를 가리키므로 함께 옮긴다
+    ...(data.calendar ? { calendar: { ...data.calendar, order: data.calendar.order.map(remap).filter((d) => d >= 0) } } : {}),
   };
 }
 

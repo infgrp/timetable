@@ -637,6 +637,23 @@ export function migrate(raw: unknown): AppData | null {
       turns: typeof rotation.turns === "number" ? rotation.turns : 0,
       log: Array.isArray(rotation.log) ? rotation.log : [],
     },
+    calendar: normalizeCalendar(parsed.calendar),
+  };
+}
+
+/** 날짜별 배정 설정을 믿을 수 있는 모양으로 — 없거나 깨졌으면 없는 것으로 본다 */
+function normalizeCalendar(raw: unknown): AppData["calendar"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const c = raw as Partial<NonNullable<AppData["calendar"]>>;
+  const numbers = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is number => Number.isInteger(x)) : []);
+  const dates = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x)) : []);
+  return {
+    enabled: Boolean(c.enabled),
+    start: typeof c.start === "string" ? c.start : "",
+    end: typeof c.end === "string" ? c.end : "",
+    order: numbers(c.order),
+    weekdays: numbers(c.weekdays).filter((d) => d >= 0 && d <= 6),
+    skip: [...new Set(dates(c.skip))].sort(),
   };
 }
 

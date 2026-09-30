@@ -9,6 +9,7 @@ import TeachersPanel from "./components/TeachersPanel";
 import CoursesPanel from "./components/CoursesPanel";
 import ResultPanel from "./components/ResultPanel";
 import RotationPanel from "./components/RotationPanel";
+import CalendarPanel from "./components/CalendarPanel";
 import ViewerPanel from "./components/ViewerPanel";
 import { Button } from "./components/ui";
 import { ConnectCard, MovedNotice, PublishDialog } from "./components/SharedPanel";
@@ -23,6 +24,7 @@ const TABS = [
   { id: "course", label: "프로그램 배정" },
   { id: "result", label: "시간표 짜기" },
   { id: "rotation", label: "로테이션" },
+  { id: "calendar", label: "날짜별 배정" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -301,6 +303,7 @@ function Main() {
             {tab === "course" && <CoursesPanel data={data} set={set} />}
             {tab === "result" && <ResultPanel data={data} set={set} />}
             {tab === "rotation" && <RotationPanel data={data} set={set} />}
+            {tab === "calendar" && <CalendarPanel data={data} set={set} />}
           </>
         )}
       </main>

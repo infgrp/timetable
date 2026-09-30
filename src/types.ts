@@ -210,6 +210,29 @@ export type RotationConfig = {
   log: RotationTurn[];
 };
 
+/**
+ * 날짜별 배정 — 과정 일차가 요일을 넘나드는 운영(2026-10 혼합과정 3일/3일).
+ *
+ * 기본과정(월·화 / 수·목·금)은 해마다 같은 요일에 같은 시간표라 요일로 짜면 된다.
+ * 3일/3일 혼합과정은 3일씩 이어 붙이므로 주마다 요일이 밀린다:
+ *   1주 월화수 = 5·6 1~3일차, 목금 = 3·4 1~2일차 / 2주 월 = 3·4 3일차, 화수목 = 5·6 1~3일차 …
+ * 그래서 시간표는 "일차"(days = 5·6 1일차 … 3·4 3일차)로 한 번만 짜 두고,
+ * 날짜마다 몇 일차인지는 여기 규칙으로 자동으로 정한다. 보기 화면은 주별로 펼쳐 보인다.
+ */
+export type CalendarConfig = {
+  enabled: boolean;
+  /** 첫 운영일 "YYYY-MM-DD" — 이날이 order[0] 일차다 */
+  start: string;
+  /** 마지막 운영일 "YYYY-MM-DD" (비우면 끝없이 돈다) */
+  end: string;
+  /** 도는 차례 — days 의 index. 비면 days 순서대로 */
+  order: number[];
+  /** 운영 요일 (0=일 … 6=토). 기본 월~금 */
+  weekdays: number[];
+  /** 운영하지 않는 날 "YYYY-MM-DD" (공휴일·준비기간) — 이날은 건너뛰고 다음 날이 이어받는다 */
+  skip: string[];
+};
+
 export type AppData = {
   version: 3;
   schoolName: string;
@@ -234,6 +257,8 @@ export type AppData = {
   /** 현재 구성된 시간표. 로테이션을 돌리면 여기의 강사가 바뀐다. */
   timetable: Assignment[];
   rotation: RotationConfig;
+  /** 날짜별 배정(혼합과정). 없거나 꺼져 있으면 요일 시간표 그대로 본다. */
+  calendar?: CalendarConfig;
 };
 
 /** ── 솔버 입출력 ─────────────────────────────────────────── */

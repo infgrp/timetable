@@ -12,6 +12,8 @@
     "stress": "esbuild scripts/stress.ts --bundle --platform=node --format=esm --outfile=scripts/stress.mjs --log-level=warning && node scripts/stress.mjs",
     "xlsx:check": "esbuild scripts/xlsx_check.ts --bundle --platform=node --format=esm --outfile=scripts/xlsx_check.mjs --log-level=warning && node scripts/xlsx_check.mjs",
     "import:check": "esbuild scripts/import_check.ts --bundle --platform=node --format=esm --outfile=scripts/import_check.mjs --log-level=warning && node scripts/import_check.mjs",
+    "calendar:check": "esbuild scripts/calendar_check.ts --bundle --platform=node --format=esm --packages=external --outfile=scripts/calendar_check.mjs --log-level=warning && node scripts/calendar_check.mjs",
+    "mixed:check": "esbuild scripts/mixed_check.ts --bundle --platform=node --format=esm --outfile=scripts/mixed_check.mjs --log-level=warning && node scripts/mixed_check.mjs",
     "render:check": "esbuild scripts/render_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/render_check.mjs --log-level=warning && node scripts/render_check.mjs",
     "requirements:check": "esbuild scripts/requirements_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/requirements_check.mjs --log-level=warning && node scripts/requirements_check.mjs",
     "i18n:check": "esbuild scripts/i18n_check.ts --bundle --platform=node --format=esm --packages=external --jsx=automatic --outfile=scripts/i18n_check.mjs --log-level=warning && node scripts/i18n_check.mjs",

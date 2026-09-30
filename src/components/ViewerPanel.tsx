@@ -7,6 +7,7 @@ import { toSheet } from "../timetableSheet";
 import { buildXlsx } from "../xlsx";
 import { downloadBlob, safeFileName } from "../export";
 import { localizeData, useI18n } from "../i18n";
+import { addDays, calendarOn, dayNumber, initialWeek, weekBands, weekColumns, weekDaySlots, weekGrid, weekRange } from "../weekly";
 import { Button, Card, Empty } from "./ui";
 import Timetable from "./Timetable";
 import type { Grid } from "./Timetable";
@@ -44,17 +45,31 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
   const [pickedIds, setPickedIds] = useState<string[]>([]);
   const [segId, setSegId] = useState("");
 
+  // 날짜별 배정(혼합과정) — 켜져 있으면 주별로 보는 것이 기본이다
+  const calendar = calendarOn(raw);
+  const [byDay, setByDay] = useState(false); // true 면 일차별(원본) 시간표
+  const [monday, setMonday] = useState(() => initialWeek(raw));
+  const weekly = calendar && !byDay;
+  const range = weekRange(raw);
+  const columns = useMemo(() => (weekly ? weekColumns(data, monday, lang) : []), [weekly, data, monday, lang]);
+  const weekDays = columns.filter((c) => c.day !== null).map((c) => c.day!);
+  const md = (date: string) => `${Number(date.slice(5, 7))}/${Number(date.slice(8))}`;
+  const weekLabel = columns.length ? `${md(columns[0].date)}~${md(columns[columns.length - 1].date)}` : "";
+  const canPrev = !range || dayNumber(monday) > dayNumber(range.first);
+  const canNext = !range?.last || dayNumber(monday) < dayNumber(range.last);
+
   const grids = useMemo(() => buildGrids(data, data.timetable), [data]);
 
-  const segment = data.segments.find((s) => s.id === segId) ?? null;
+  const segment = weekly ? null : data.segments.find((s) => s.id === segId) ?? null;
   const viewDays = useMemo(() => {
     const all = data.days.map((_, i) => i);
     if (!segment) return all;
     const picked = segment.days.filter((d) => d >= 0 && d < data.days.length);
     return picked;
   }, [segment, data.days]);
-  const dayLabels = viewDays.map((i) => data.days[i]);
-  const segSuffix = segment ? ` (${segment.name || t("(이름없음)")})` : "";
+  const dayLabels = weekly ? columns.map((c) => c.label) : viewDays.map((i) => data.days[i]);
+  const shownDaySlots = weekly ? weekDaySlots(data, columns) : data.daySlots;
+  const segSuffix = weekly ? ` (${weekLabel})` : segment ? ` (${segment.name || t("(이름없음)")})` : "";
 
   const classesHere = segment
     ? data.classes.filter((c) => {
@@ -81,11 +96,14 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
 
   const gridOf = (id: string): Grid => {
     const merged = mergedOf(id);
-    if (merged) return merged.grid;
+    // 주별이면 일차로 짠 격자에서 그 주의 날짜에 맞는 일차 칸을 골라 온다
+    if (merged) return weekly ? weekGrid(merged.grid, columns) : merged.grid;
     const full =
       (axis === "class" ? grids.byClass : axis === "teacher" ? grids.byTeacher : grids.byRoom).get(id) ?? [];
-    return segment ? sliceGrid(full, viewDays) : full;
+    return weekly ? weekGrid(full, columns) : segment ? sliceGrid(full, viewDays) : full;
   };
+  /** 요일 머리 위 줄 — 주별이면 그날의 일차, 합본이면 묶음 */
+  const bandsOf = (id: string) => (weekly ? weekBands(data, columns, t) : mergedOf(id)?.bands);
 
   const head = data.schoolName ? data.schoolName + " " : "";
   const nameFor = (name: string) => (axis === "teacher" ? t("{name} 강사", { name }) : name);
@@ -108,9 +126,9 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
         title: `${head}${nameFor(x.name)} ${t("시간표{suffix}", { suffix: segSuffix })}`,
         days: dayLabels,
         slots: data.slots,
-        daySlots: data.daySlots,
+        daySlots: shownDaySlots,
         grid: gridOf(x.id),
-        bands: mergedOf(x.id)?.bands,
+        bands: bandsOf(x.id),
         lang,
       });
     });
@@ -172,7 +190,36 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
             </div>
           </div>
 
-          {data.segments.length > 0 && (
+          {calendar && (
+            <Row label={t("보기")} cols={2}>
+              <Button wide variant={!byDay ? "primary" : "ghost"} onClick={() => setByDay(false)}>
+                {t("주별 (날짜)")}
+              </Button>
+              <Button wide variant={byDay ? "primary" : "ghost"} onClick={() => setByDay(true)}>
+                {t("일차별 (원본)")}
+              </Button>
+            </Row>
+          )}
+
+          {weekly && (
+            <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+              <span className="text-xs font-semibold text-tt-700">{t("주")}</span>
+              <div className="grid grid-cols-[auto_1fr_auto] items-center gap-1.5 sm:flex sm:gap-2">
+                <Button disabled={!canPrev} onClick={() => setMonday(addDays(monday, -7))}>
+                  ◀ <span className="hidden sm:inline">{t("이전 주")}</span>
+                </Button>
+                <span className="text-center text-sm font-bold text-tt-800">{weekLabel}</span>
+                <Button disabled={!canNext} onClick={() => setMonday(addDays(monday, 7))}>
+                  <span className="hidden sm:inline">{t("다음 주")}</span> ▶
+                </Button>
+                <div className="col-span-3 sm:col-span-1">
+                  <Button wide onClick={() => setMonday(initialWeek(raw))}>{t("이번 주")}</Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!weekly && data.segments.length > 0 && (
             <Row label={t("구간")} cols={data.segments.length + 1 >= 4 ? 4 : data.segments.length + 1 === 2 ? 2 : 3}>
               <Button wide variant={segId === "" ? "primary" : "ghost"} onClick={() => { setSegId(""); setPickedIds([]); }}>
                 <span className="sm:hidden">{t("전체")}</span>
@@ -214,7 +261,9 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
         )}
       </Card>
 
-      {viewDays.length === 0 ? (
+      {weekly && weekDays.length === 0 ? (
+        <Empty>{t("이 주에는 운영하는 날이 없습니다.")}</Empty>
+      ) : viewDays.length === 0 ? (
         <Empty>{t("이 구간의 운영 요일이 없습니다. [시간표 구성하기]에서 요일을 지정하세요.")}</Empty>
       ) : targets.length === 0 ? (
         <Empty>{t("이 구간에 해당하는 {axis}이(가) 없습니다.", { axis: lang === "en" ? t(AXIS_LABEL[axis]).toLowerCase() : AXIS_LABEL[axis] })}</Empty>
@@ -225,7 +274,7 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
             const g = gridOf(x.id);
             const used = usedCells(g);
             // 합본은 여러 반을 이어 붙인 것이라 반 하나의 등원 요일로 칸 수를 재면 안 된다.
-            const capacity = capacityForDays(data, viewDays, merged || axis !== "class" ? undefined : x.id);
+            const capacity = capacityForDays(data, weekly ? weekDays : viewDays, merged || axis !== "class" ? undefined : x.id);
             return (
               <Timetable
                 key={x.id}
@@ -237,9 +286,9 @@ export default function ViewerPanel({ data: raw, onBuild }: Props) {
                 }
                 days={dayLabels}
                 slots={data.slots}
-                daySlots={data.daySlots}
+                daySlots={shownDaySlots}
                 grid={g}
-                bands={merged?.bands}
+                bands={bandsOf(x.id)}
               />
             );
           })}

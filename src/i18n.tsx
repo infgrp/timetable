@@ -104,6 +104,19 @@ export const EN: Record<string, Entry> = {
   "아직 시간표가 없습니다": "No timetable yet",
   "[시간표 구성하기]에서 자동으로 짜거나, 이미 쓰고 있는 엑셀을 올리거나, 손으로 채울 수 있습니다.": "An admin can build one under [Build]: automatically, from an existing Excel file, or by hand.",
   "시간표 구성하러 가기": "Go to Build",
+  // 날짜별 배정(혼합과정)
+  "보기": "View",
+  "주별 (날짜)": "By week (dates)",
+  "일차별 (원본)": "By day (template)",
+  "주": "Week",
+  "이전 주": "Previous",
+  "다음 주": "Next",
+  "이번 주": "This week",
+  "이 주에는 운영하는 날이 없습니다.": "No program days this week.",
+  "운영 전": "Not started",
+  "운영 끝": "Finished",
+  "쉬는 요일": "Day off",
+  "쉬는 날": "Holiday",
   "로테이션 {n}번 적용된 시간표입니다": (v) => `Rotation applied ${v.n} ${plural(v.n, "time", "times")}`,
   " · 마지막: {note}": " · last: {note}",
   "이 구간의 운영 요일이 없습니다. [시간표 구성하기]에서 요일을 지정하세요.": "These days have no operating days set. An admin can set them under [Build].",
@@ -182,7 +195,9 @@ const WORD: Record<string, string> = { "점심시간": "Lunch", "점심": "Lunch
 
 export function dayEn(d: string): string {
   const s = d.trim().replace(/요일$/, "");
-  return DAY[s] ?? d;
+  if (DAY[s]) return DAY[s];
+  // 혼합과정의 일차 이름 — "5·6학년 1일차" → "Grade 5·6 Day 1"
+  return d.replace(/([\d·,~\-]+)\s*학년/g, "Grade $1").replace(/(\d+)\s*일차/g, "Day $1");
 }
 
 export function slotLabelEn(label: string): string {
@@ -194,7 +209,7 @@ export function slotLabelEn(label: string): string {
 /** "월·화", "수·목·금 (4학년)" → "Mon·Tue", "Wed·Thu·Fri (Grade 4)" — 요일 글자가 따로 떨어져 있을 때만 */
 export function segmentEn(name: string): string {
   return name
-    .replace(/(\d)\s*학년/g, "Grade $1")
+    .replace(/([\d·,~\-]+)\s*학년/g, "Grade $1")
     .replace(/(^|[^가-힣])([월화수목금토일](?:[\s·,/~\-]*[월화수목금토일])*)(?=[^가-힣]|$)/g, (_m, pre: string, run: string) => pre + run.replace(/[월화수목금토일]/g, (c) => DAY[c]));
 }
 
